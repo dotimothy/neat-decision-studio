@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Models &middot; Laya on Modalix</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f4b; --warn: #b45309; --bad: #c0362c;
+    --track: #e8ebf1; --chip: #eef2f8; --field: #ffffff;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebf0; --muted: #98a2b3; --line: #2a303a;
+      --accent: #5b9dff; --accent-ink: #0b1220; --good: #4cc38a; --warn: #f0a84b; --bad: #f47067;
+      --track: #232934; --chip: #1f252e; --field: #11151a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 18px 24px 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid transparent; font-size: 14px; }
+  nav a:hover { border-color: var(--line); }
+  nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
+  main { max-width: 880px; padding: 0 24px 32px; display: grid; gap: 14px; }
+  @media (max-width: 700px) { main { padding: 0 16px 24px; } header { padding: 16px 16px 10px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  .memory { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  .bar { height: 10px; background: var(--track); border-radius: 999px; overflow: hidden; margin-top: 8px; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+  .model { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; align-items: start; }
+  .model h3 { margin: 0; font-size: 16.5px; }
+  .model p { margin: 4px 0 0; color: var(--muted); font-size: 13.5px; }
+  .pill { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12.5px;
+          border: 1px solid currentColor; margin-left: 8px; vertical-align: 2px; }
+  .pill.loaded { color: var(--good); } .pill.unloaded { color: var(--muted); } .pill.loading { color: var(--warn); }
+  .graphs { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 14px; }
+  .graphs label { display: inline-flex; align-items: center; gap: 6px; }
+  .graphs span { color: var(--muted); font-variant-numeric: tabular-nums; }
+  button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 14px; cursor: pointer; min-width: 92px; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .error { color: var(--bad); margin: 0; overflow-wrap: anywhere; }
+  .note { color: var(--muted); font-size: 13.5px; margin: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Models</h1>
+  <p>What is loaded on the Modalix MLA</p>
+  <nav><a href="/">Questions</a><a href="/games">Games</a><a class="here" href="/models">Models</a></nav>
+</header>
+<main>
+  <section>
+    <h2>MLA model memory</h2>
+    <div class="memory"><span id="memText">&ndash;</span><span id="memLoaded"></span></div>
+    <div class="bar"><i id="memBar" style="width:0"></i></div>
+    <p class="note" style="margin-top:8px">Compiled graphs live in memory reserved for the MLA, separate from
+      the board's Linux RAM and shared with any other application using the MLA. Only this app's models are
+      counted here.</p>
+  </section>
+  <p class="error" id="error" hidden></p>
+  <div id="models" style="display:grid; gap:14px"></div>
+  <p class="note">Loading takes 3&ndash;10 seconds per model. Nothing is loaded or unloaded automatically:
+    a page whose model is missing shows a Load button instead of answering.</p>
+</main>
+<script>
+const CHECKPOINTS = {
+  "laya": ["Laya", "English, ModernBERT-large. The general question model."],
+  "laya-typed-decisions": ["Laya typed-decisions", "English, fine-tuned by upstream on typed-decision workflows."],
+  "laya-multilingual": ["Laya multilingual", "100+ languages, mmBERT-base: smaller and about twice as fast."],
+  "laya-dino": ["Laya-dino", "Decision head fine-tuned for Dino Arena. Needed by the Games page."],
+};
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  for (const child of children) node.append(child);
+  return node;
+};
+const mb = (bytes) => bytes >= 1 << 30 ? (bytes / (1 << 30)).toFixed(2) + " GB" : Math.round(bytes / (1 << 20)) + " MB";
+const chosen = {};      // model -> Set of graph sizes ticked for the next load
+let busy = null;        // model being loaded or unloaded by this page
+
+function render(info) {
+  const { mla_loaded_bytes: used, mla_total_bytes: total } = info.memory;
+  $("memText").textContent = total ? `${mb(used)} loaded by this app, of ${mb(total)} reserved for the MLA` : `${mb(used)} loaded by this app`;
+  $("memBar").style.width = (total ? used / total * 100 : 0).toFixed(1) + "%";
+  const loaded = Object.values(info.models).filter((m) => m.loaded).length;
+  $("memLoaded").textContent = `${loaded} of ${Object.keys(info.models).length} models loaded`;
+
+  const root = $("models");
+  root.replaceChildren();
+  for (const [name, model] of Object.entries(info.models)) {
+    const [title, about] = CHECKPOINTS[model.checkpoint] || [model.checkpoint || name, ""];
+    const working = busy === name || model.state === "loading";
+    chosen[name] ??= new Set(model.loaded ? model.loaded_seq_lens : model.seq_lens);
+    const graphs = el("div", { className: "graphs" });
+    for (const graph of model.graphs) {
+      const box = el("input", { type: "checkbox", checked: model.loaded ? model.loaded_seq_lens.includes(graph.seq_len)
+                                                                         : chosen[name].has(graph.seq_len),
+                                disabled: model.loaded || working });
+      box.onchange = () => { box.checked ? chosen[name].add(graph.seq_len) : chosen[name].delete(graph.seq_len); render(info); };
+      graphs.append(el("label", {}, box, `${graph.seq_len} tokens`, el("span", { textContent: mb(graph.bytes) })));
+    }
+    const need = model.graphs.filter((g) => chosen[name].has(g.seq_len)).reduce((sum, g) => sum + g.bytes, 0) + model.fixed_bytes;
+    const state = working ? (model.loaded ? "unloading" : "loading") : model.state;
+    const pill = el("span", { className: "pill " + (working ? "loading" : model.state),
+                              textContent: working ? state + "…" : model.loaded ? "loaded" : "not loaded" });
+    const button = el("button", { textContent: model.loaded ? "Unload" : "Load", disabled: working || busy !== null
+                                    || (!model.loaded && !chosen[name].size) });
+    if (!model.loaded) button.className = "primary";
+    button.onclick = () => act(name, model.loaded ? "unload" : "load");
+    const detail = model.loaded ? `On the MLA: ${model.loaded_seq_lens.join(", ")}-token graph${model.loaded_seq_lens.length > 1 ? "s" : ""}.`
+                                : `Loading the ticked graphs needs about ${mb(need)}.`;
+    root.append(el("section", { className: "model" },
+      el("div", {}, el("h3", {}, title, pill), el("p", { textContent: about + " " + detail }), graphs),
+      button));
+  }
+}
+
+async function refresh() {
+  if (busy) return;
+  try { render(await (await fetch("/api/info")).json()); } catch (_) { /* board unreachable: keep the last view */ }
+}
+
+async function act(name, action) {
+  busy = name;
+  $("error").hidden = true;
+  render(await (await fetch("/api/info")).json());
+  let body;
+  try {
+    const request = { model: name };
+    if (action === "load") request.seq_lens = [...chosen[name]].sort((a, b) => a - b);
+    const response = await fetch("/api/models/" + action, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                            body: JSON.stringify(request) });
+    body = await response.json();
+  } catch (error) {
+    body = { error: "The board did not answer: " + error.message };
+  }
+  busy = null;
+  if (body.error) { $("error").hidden = false; $("error").textContent = body.error; return refresh(); }
+  render(body);
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

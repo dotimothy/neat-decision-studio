@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laya on Modalix</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f4b; --warn: #b45309; --bad: #c0362c;
+    --track: #e8ebf1; --chip: #eef2f8; --field: #ffffff;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebf0; --muted: #98a2b3; --line: #2a303a;
+      --accent: #5b9dff; --accent-ink: #0b1220; --good: #4cc38a; --warn: #f0a84b; --bad: #f47067;
+      --track: #232934; --chip: #1f252e; --field: #11151a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px;
+           padding: 18px 24px 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid transparent; font-size: 14px; }
+  nav a:hover { border-color: var(--line); }
+  nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+  .chip { background: var(--chip); border: 1px solid var(--line); border-radius: 999px;
+          padding: 2px 10px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px;
+         padding: 0 24px 32px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 0 16px 24px; }
+                              header { padding: 16px 16px 10px; } .chips { margin-left: 0; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .presets { margin-bottom: 14px; }
+  .qhead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+           gap: 8px; margin-top: 16px; }
+  .qhead h2 { margin: 0; }
+  .hint { color: var(--muted); font-size: 13px; }
+  button.small { padding: 3px 10px; font-size: 13.5px; }
+  .saved { display: inline-flex; }
+  .saved button:first-child { border-radius: 8px 0 0 8px; }
+  .saved button:last-child { border-radius: 0 8px 8px 0; border-left: 0; padding: 6px 8px; color: var(--muted); }
+  .empty-q { color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 14px;
+             margin-top: 10px; }
+  .modelrow { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; }
+  .modelrow label { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em;
+                    color: var(--muted); font-weight: 600; }
+  .note { color: var(--muted); font-size: 13px; margin: 6px 0 14px; }
+  .loadbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px;
+             border: 1px solid var(--warn); border-radius: 10px; padding: 8px 12px; margin: -4px 0 14px; }
+  button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
+                   font-weight: 600; }
+  button.ghost { background: transparent; padding: 2px 8px; color: var(--muted); }
+  button.active { border-color: var(--accent); color: var(--accent); }
+  textarea, input[type=text], select {
+    font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 9px; width: 100%; min-width: 0; }
+  textarea:focus, input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  textarea { min-height: 132px; resize: vertical; }
+  label.small { font-size: 12.5px; color: var(--muted); display: block; margin: 10px 0 4px; }
+  .question { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-top: 10px; }
+  .question .top { display: grid; grid-template-columns: minmax(0, 1fr) 110px auto; gap: 8px; }
+  .option { display: grid; grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr) auto; gap: 6px;
+            margin-top: 6px; }
+  .option.single { grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; }
+  .option .idx { color: var(--muted); font: 12.5px var(--mono); text-align: center; }
+  .actions { margin-top: 14px; justify-content: space-between; }
+  .switch { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13.5px; }
+
+  .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero .value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .hero .unit { color: var(--muted); }
+  .budget { position: relative; height: 10px; background: var(--track); border-radius: 999px; margin: 10px 0 4px; }
+  .budget .fill { height: 100%; border-radius: 999px; background: var(--good); width: 0; transition: width .18s; }
+  .budget .fill.over { background: var(--bad); }
+  .budget .mark { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); opacity: .55; }
+  .legend { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--chip); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-variant-numeric: tabular-nums; font-size: 16px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .answer { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+  .answer .head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .answer .qid { font: 12.5px var(--mono); color: var(--muted); }
+  .answer .verdict { font-size: 19px; font-weight: 650; overflow-wrap: anywhere; }
+  .bar { display: grid; grid-template-columns: minmax(70px, 30%) minmax(0, 1fr) 52px; gap: 8px;
+         align-items: center; margin-top: 6px; font-size: 13.5px; }
+  .bar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar .track i { display: block; height: 100%; background: var(--accent); opacity: .45; border-radius: 999px; }
+  .bar.top .track i { opacity: 1; }
+  .bar .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .meta { margin-top: 8px; font-size: 12.5px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+  .tag { border-radius: 999px; padding: 1px 8px; border: 1px solid currentColor; }
+  .tag.act { color: var(--good); } .tag.escalate { color: var(--warn); }
+  .error { color: var(--bad); margin-top: 10px; overflow-wrap: anywhere; }
+  .empty { color: var(--muted); }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+        overflow-x: auto; font: 12.5px/1.4 var(--mono); margin: 8px 0 0; max-height: 320px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Laya on Modalix</h1>
+  <p>Typed decisions in one forward pass on the MLA</p>
+  <nav><a class="here" href="/">Questions</a><a id="gamesLink" href="/games" hidden>Games</a><a href="/models">Models</a></nav>
+  <div class="chips" id="chips"></div>
+</header>
+<main>
+  <section>
+    <div class="modelrow">
+      <label for="model">Model</label>
+      <select id="model" aria-describedby="modelNote"></select>
+    </div>
+    <p class="note" id="modelNote"></p>
+    <div class="loadbar" id="loadBar" hidden>
+      <span id="loadText"></span>
+      <button class="primary small" id="loadButton">Load model</button>
+    </div>
+    <h2>Examples</h2>
+    <div class="row presets" id="presets"></div>
+    <label class="small" for="state">State &mdash; the text or JSON to decide on</label>
+    <textarea id="state" spellcheck="false" placeholder="Paste or type what should be decided on: a message, a ticket, a log line, a JSON record&hellip;"></textarea>
+    <div class="qhead">
+      <h2>Questions</h2>
+      <span class="row">
+        <span class="hint">Add your own:</span>
+        <button class="small" data-add="choice" title="Pick one of several options">+ Choice</button>
+        <button class="small" data-add="score" title="Rate on an ordered scale">+ Score</button>
+        <button class="small" data-add="noul" title="A yes / no question">+ Yes / no</button>
+      </span>
+    </div>
+    <div id="questions"></div>
+    <div class="row actions">
+      <span class="row">
+        <button id="save" title="Keep this state and its questions in this browser">Save scenario</button>
+        <button id="blank">Start blank</button>
+      </span>
+      <span class="row">
+        <label class="switch"><input type="checkbox" id="live" checked> Decide as I type</label>
+        <button class="primary" id="run">Decide</button>
+      </span>
+    </div>
+  </section>
+
+  <section>
+    <div class="qhead" style="margin-top:0">
+      <h2>Latency</h2>
+      <button class="small" id="clear" disabled>Clear results</button>
+    </div>
+    <div class="hero"><span class="value" id="perDecision">&ndash;</span>
+      <span class="unit">ms on the MLA per decision</span></div>
+    <div class="budget"><div class="fill" id="budgetFill"></div><div class="mark" id="budgetMark"></div></div>
+    <div class="legend"><span>0 ms</span><span>30 ms budget</span><span id="budgetMax">45 ms</span></div>
+    <div class="stats" id="stats"></div>
+    <h2 style="margin-top:18px">Decisions</h2>
+    <div id="answers"></div>
+    <div class="error" id="error" hidden></div>
+    <details><summary>Request and response JSON</summary><pre id="raw"></pre></details>
+  </section>
+</main>
+
+<script>
+const BUDGET_MS = 30, BUDGET_SCALE_MS = 45;
+
+const PRESETS = [
+  { name: "Support triage",
+    state: "Hi, we were billed twice for March. Please refund the duplicate today or we will cancel our plan.",
+    questions: [
+      { id: "department", type: "choice", instructions: "Which department should handle this?",
+        options: [["billing", "invoices, payments, refunds"], ["technical", "bugs, outages, system errors"], ["other", "everything else"]] },
+      { id: "urgency", type: "score", instructions: "How urgent is this?", options: ["not urgent", "soon", "blocking"] },
+      { id: "churn_risk", type: "noul", instructions: "Does the user threaten to cancel or leave?" } ] },
+  { name: "Agent tool routing",
+    state: "What will the weather be like in Tokyo tomorrow afternoon? I need to know whether to pack an umbrella.",
+    questions: [
+      { id: "tool", type: "choice", instructions: "Which tool should the agent call next?",
+        options: [["weather_api", "forecasts and current conditions for a place"], ["calendar", "create, move or list events"],
+                  ["web_search", "look up general facts on the web"], ["calculator", "arithmetic and unit conversion"],
+                  ["none", "answer directly without a tool"]] },
+      { id: "needs_clarification", type: "noul", instructions: "Is the request missing information the agent must ask for?" } ] },
+  { name: "Content moderation",
+    state: "Great write-up, thanks for sharing the benchmark scripts. One nit: the second chart is missing its axis labels.",
+    questions: [
+      { id: "action", type: "choice", instructions: "What should happen to this comment?",
+        options: [["allow", "on-topic and civil"], ["review", "borderline, needs a human look"], ["block", "abusive, spam or unsafe"]] },
+      { id: "personal_attack", type: "noul", instructions: "Does the comment attack a person?" } ] },
+  { name: "Cell safety gate",
+    state: JSON.stringify({ zone: "A3", person_detected: true, distance_m: 0.6, arm_state: "moving", arm_speed: "high", light_curtain: "tripped" }, null, 1),
+    questions: [
+      { id: "command", type: "choice", instructions: "What should the robot cell do now?",
+        options: [["continue", "nothing unusual, keep running"], ["slow", "reduce speed and keep monitoring"], ["stop", "halt motion immediately"]] },
+      { id: "risk", type: "score", instructions: "How high is the risk of injury?", options: ["none", "low", "elevated", "severe"] } ] },
+  { name: "Soporte (espa\u00f1ol)",
+    state: "Hola, me cobraron dos veces la suscripci\u00f3n de marzo. Necesito el reembolso hoy mismo o cancelar\u00e9 mi plan.",
+    questions: [
+      { id: "department", type: "choice", instructions: "Which department should handle this?",
+        options: [["billing", "invoices, payments, refunds"], ["technical", "bugs, outages, system errors"], ["other", "everything else"]] },
+      { id: "churn_risk", type: "noul", instructions: "Does the user threaten to cancel or leave?" } ] },
+  { name: "Email priority",
+    state: "Subject: Contract renewal - signature needed by Friday\n\nHi team, legal has approved the renewal terms. We need the countersigned copy back by Friday 5pm or the current pricing lapses. Let me know if anything blocks you.",
+    questions: [
+      { id: "priority", type: "choice", instructions: "How should this email be prioritized?",
+        options: [["now", "needs action today"], ["this_week", "needs action within days"], ["later", "no deadline"], ["ignore", "newsletter, spam or FYI"]] },
+      { id: "has_deadline", type: "noul", instructions: "Does the email state a deadline?" } ] },
+];
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  for (const child of children) node.append(child);
+  return node;
+};
+let questions = [];
+// What the model selector offers: filled from /api/info. Each entry pins a model and, for the
+// general checkpoint, optionally one compiled graph.
+let MODELS = { auto: { request: {}, note: "" } };
+let timer = null, sequence = 0;
+
+function defaultOptions(type) {
+  if (type === "choice") return [["option_a", ""], ["option_b", ""]];
+  if (type === "score") return ["low", "medium", "high"];
+  return [];
+}
+
+function renderQuestions() {
+  const root = $("questions");
+  root.replaceChildren();
+  if (!questions.length) {
+    root.append(el("p", { className: "empty-q", textContent: "No questions yet. Add a choice, score or yes / no question above." }));
+  }
+  questions.forEach((q, qi) => {
+    const id = el("input", { type: "text", value: q.id, placeholder: "id", ariaLabel: "Question id" });
+    id.oninput = () => { q.id = id.value; changed(); };
+    const type = el("select", { ariaLabel: "Question type" });
+    for (const t of ["choice", "score", "noul"]) type.append(el("option", { value: t, textContent: t, selected: t === q.type }));
+    type.onchange = () => { q.type = type.value; q.options = defaultOptions(q.type); renderQuestions(); changed(); };
+    const remove = el("button", { className: "ghost", textContent: "Remove", title: "Remove question" });
+    remove.onclick = () => { questions.splice(qi, 1); renderQuestions(); changed(); };
+    const hints = { choice: "Your question, e.g. Which team owns this?", score: "Your question, e.g. How severe is this?",
+                    noul: "Your yes / no question, e.g. Is the customer angry?" };
+    const ins = el("input", { type: "text", value: q.instructions, placeholder: hints[q.type], ariaLabel: "Question" });
+    ins.style.marginTop = "8px";
+    ins.oninput = () => { q.instructions = ins.value; changed(); };
+    const card = el("div", { className: "question" }, el("div", { className: "top" }, id, type, remove), ins);
+
+    if (q.type !== "noul") {
+      q.options.forEach((opt, oi) => {
+        const drop = el("button", { className: "ghost", textContent: "×", title: "Remove option" });
+        drop.onclick = () => { q.options.splice(oi, 1); renderQuestions(); changed(); };
+        if (q.type === "choice") {
+          const label = el("input", { type: "text", value: opt[0], placeholder: "label", ariaLabel: "Option label" });
+          const desc = el("input", { type: "text", value: opt[1], placeholder: "what it covers (optional)", ariaLabel: "Option description" });
+          label.oninput = () => { opt[0] = label.value; changed(); };
+          desc.oninput = () => { opt[1] = desc.value; changed(); };
+          card.append(el("div", { className: "option" }, label, desc, drop));
+        } else {
+          const level = el("input", { type: "text", value: opt, placeholder: "what this level means", ariaLabel: "Level " + oi });
+          level.oninput = () => { q.options[oi] = level.value; changed(); };
+          card.append(el("div", { className: "option single" }, el("span", { className: "idx", textContent: oi }), level, drop));
+        }
+      });
+      const more = el("button", { className: "ghost", textContent: q.type === "choice" ? "+ option" : "+ level" });
+      more.style.marginTop = "6px";
+      more.onclick = () => { q.options.push(q.type === "choice" ? ["", ""] : ""); renderQuestions(); };
+      card.append(more);
+    }
+    root.append(card);
+  });
+}
+
+function buildRequest() {
+  const out = {};
+  for (const q of questions) {
+    const id = q.id.trim();
+    if (!id || !q.instructions.trim()) continue;
+    const def = { type: q.type, instructions: q.instructions };
+    if (q.type === "choice") {
+      const criteria = {};
+      for (const [label, desc] of q.options) if (label.trim()) criteria[label.trim()] = desc;
+      if (Object.keys(criteria).length < 2) continue;
+      def.criteria = criteria;
+    } else if (q.type === "score") {
+      const levels = q.options.filter((level) => level.trim());
+      if (levels.length < 2) continue;
+      def.criteria = levels;
+    }
+    out[id] = def;
+  }
+  const text = $("state").value;
+  let state = text;
+  if (/^\s*[\[{]/.test(text)) { try { state = JSON.parse(text); } catch (_) { state = text; } }
+  return { state, questions: out, ...(MODELS[$("model").value] || MODELS.auto).request };
+}
+
+function changed() {
+  if (!$("live").checked) return;
+  clearTimeout(timer);
+  timer = setTimeout(decide, 180);
+}
+
+async function decide() {
+  const request = buildRequest();
+  const mine = ++sequence;
+  if (!$("state").value.trim() || !Object.keys(request.questions).length) return;
+  if (!isLoaded()) return;   // the load bar under the selector says why
+  const started = performance.now();
+  // Switching to a model that is not on the MLA yet takes a few seconds to load.
+  const slow = setTimeout(() => { $("error").hidden = false; $("error").className = "note";
+                                  $("error").textContent = "Loading the model on the MLA\u2026"; }, 400);
+  let body;
+  try {
+    const response = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
+    body = await response.json();
+  } catch (error) {
+    body = { error: "The board did not answer: " + error.message };
+  }
+  clearTimeout(slow);
+  $("error").className = "error";
+  if (mine !== sequence) return;  // a newer request superseded this one
+  const roundTrip = performance.now() - started;
+  $("raw").textContent = JSON.stringify({ request, response: body }, null, 2);
+  $("error").hidden = !body.error;
+  $("error").textContent = body.error || "";
+  if (body.not_loaded) refreshModels().catch(() => {});   // it was unloaded from the Models page
+  if (body.error) return;
+  $("clear").disabled = false;
+  renderLatency(body.usage, body.server_ms, roundTrip);
+  renderAnswers(body.answers);
+}
+
+function renderLatency(usage, serverMs, roundTrip) {
+  const per = usage.mla_ms / usage.decisions;
+  $("perDecision").textContent = per.toFixed(1);
+  const fill = $("budgetFill");
+  fill.style.width = Math.min(100, per / BUDGET_SCALE_MS * 100) + "%";
+  fill.classList.toggle("over", per > BUDGET_MS);
+  const stat = (value, label) => el("div", { className: "stat" }, el("b", { textContent: value }), el("span", { textContent: label }));
+  $("stats").replaceChildren(
+    stat(usage.decisions, usage.decisions === 1 ? "decision" : "decisions"),
+    stat(usage.latency_ms.toFixed(1) + " ms", "runtime total"),
+    stat(usage.mla_ms.toFixed(1) + " ms", "MLA"),
+    stat((usage.tokenize_ms + usage.pre_ms + usage.post_ms).toFixed(2) + " ms", "CPU pre + post"),
+    stat(usage.tokens + " / " + usage.seq_len, "tokens / graph"),
+    stat(roundTrip.toFixed(0) + " ms", "browser round trip"));
+}
+
+function renderAnswers(answers) {
+  const root = $("answers");
+  root.replaceChildren();
+  for (const [qid, a] of Object.entries(answers)) {
+    let verdict, bars = [];
+    if (a.type === "choice") {
+      verdict = a.choice;
+      bars = Object.entries(a.probabilities).map(([name, p]) => [name, p, name === a.choice]);
+    } else if (a.type === "score") {
+      verdict = a.score.toFixed(2) + " / " + (Object.keys(a.legend).length - 1);
+      const best = Math.max(...Object.values(a.probabilities));
+      bars = Object.entries(a.probabilities).map(([level, p]) => [level + " · " + a.legend[level], p, p === best]);
+    } else {
+      verdict = a.noul >= 0.5 ? "yes" : "no";
+      bars = [["yes", a.noul, a.noul >= 0.5], ["no", 1 - a.noul, a.noul < 0.5]];
+    }
+    const card = el("div", { className: "answer" },
+      el("div", { className: "head" }, el("span", { className: "verdict", textContent: verdict }),
+         el("span", { className: "qid", textContent: qid + " · " + a.type })));
+    for (const [name, p, top] of bars) {
+      const inner = el("i"); inner.style.width = (p * 100).toFixed(1) + "%";
+      card.append(el("div", { className: "bar" + (top ? " top" : "") },
+        el("span", { className: "name", textContent: name, title: name }),
+        el("span", { className: "track" }, inner),
+        el("span", { className: "pct", textContent: (p * 100).toFixed(1) + "%" })));
+    }
+    const act = a.action.act_probability >= 0.5;
+    card.append(el("div", { className: "meta" },
+      el("span", { className: "tag " + (act ? "act" : "escalate"), textContent: act ? "act" : "escalate" }),
+      el("span", { textContent: "answer confidence " + (a.answer_confidence * 100).toFixed(1) + "%" }),
+      el("span", { textContent: "act probability " + (a.action.act_probability * 100).toFixed(1) + "%" })));
+    root.append(card);
+  }
+}
+
+// Scenarios people save are kept in this browser only.
+const STORE = "laya.scenarios";
+function savedScenarios() {
+  try { return JSON.parse(localStorage.getItem(STORE)) || []; } catch (_) { return []; }
+}
+function storeScenarios(list) {
+  try { localStorage.setItem(STORE, JSON.stringify(list)); return true; } catch (_) { return false; }
+}
+
+function loadScenario(scenario, button) {
+  $("state").value = scenario.state;
+  questions = JSON.parse(JSON.stringify(scenario.questions)).map((q) => ({ options: [], ...q }));
+  renderQuestions();
+  for (const other of $("presets").querySelectorAll("button")) other.classList.toggle("active", other === button);
+  decide();
+}
+function loadPreset(index) { loadScenario(PRESETS[index], $("presets").children[index]); }
+
+function renderPresets() {
+  const root = $("presets");
+  root.replaceChildren();
+  for (const preset of PRESETS) {
+    const button = el("button", { textContent: preset.name });
+    button.onclick = () => loadScenario(preset, button);
+    root.append(button);
+  }
+  savedScenarios().forEach((scenario, index) => {
+    const open = el("button", { textContent: scenario.name, title: "Saved in this browser" });
+    open.onclick = () => loadScenario(scenario, open);
+    const remove = el("button", { textContent: "\u00d7", title: "Delete saved scenario", ariaLabel: "Delete " + scenario.name });
+    remove.onclick = () => {
+      const list = savedScenarios(); list.splice(index, 1); storeScenarios(list); renderPresets();
+    };
+    root.append(el("span", { className: "saved" }, open, remove));
+  });
+}
+
+function addQuestion(type) {
+  const used = new Set(questions.map((q) => q.id));
+  let n = questions.length + 1;
+  while (used.has("question_" + n)) n++;
+  questions.push({ id: "question_" + n, type, instructions: "", options: defaultOptions(type) });
+  renderQuestions();
+  // Put the cursor where the question is typed; nothing is sent until it has text.
+  const card = $("questions").lastElementChild;
+  card.querySelectorAll("input[type=text]")[1].focus();
+  card.scrollIntoView({ block: "nearest" });
+}
+
+renderPresets();
+$("budgetMark").style.left = (BUDGET_MS / BUDGET_SCALE_MS * 100) + "%";
+$("budgetMax").textContent = BUDGET_SCALE_MS + " ms";
+$("state").oninput = changed;
+$("run").onclick = decide;
+for (const button of document.querySelectorAll("[data-add]")) button.onclick = () => addQuestion(button.dataset.add);
+// Empties the results panel; the state and the questions are left alone.
+function clearResults(message) {
+  sequence++;   // drop any answer still on its way
+  $("answers").replaceChildren(el("p", { className: "empty", textContent: message }));
+  $("stats").replaceChildren();
+  $("perDecision").textContent = "\u2013";
+  $("budgetFill").style.width = "0";
+  $("raw").textContent = "";
+  $("error").hidden = true;
+  $("clear").disabled = true;
+}
+function startBlank() {
+  $("state").value = "";
+  questions = [];
+  renderQuestions();
+  for (const other of $("presets").querySelectorAll("button")) other.classList.remove("active");
+  clearResults("Type a state, add a question, and the decision appears here. Or pick an example above.");
+  $("state").focus();
+}
+$("blank").onclick = startBlank;
+$("clear").onclick = () => clearResults("Results cleared. Press Decide, or edit the state or a question, to run again.");
+$("save").onclick = () => {
+  const name = (prompt("Name this scenario") || "").trim();
+  if (!name) return;
+  const list = savedScenarios().filter((scenario) => scenario.name !== name);
+  list.push({ name, state: $("state").value, questions: JSON.parse(JSON.stringify(questions)) });
+  if (!storeScenarios(list)) return alert("This browser would not store the scenario.");
+  renderPresets();
+};
+// Names and one-line descriptions for the checkpoints the board may have.
+const CHECKPOINTS = {
+  "laya": ["Laya", "English, ModernBERT-large."],
+  "laya-typed-decisions": ["Laya typed-decisions", "English, fine-tuned by upstream on typed-decision workflows."],
+  "laya-multilingual": ["Laya multilingual", "100+ languages, mmBERT-base (smaller and faster)."],
+  "laya-dino": ["Laya-dino", "Fine-tuned for Dino Arena: its head only knows run / jump / duck, so its answers to other questions are not meaningful."],
+};
+let modelInfo = {};
+
+function isLoaded() {
+  const chosen = MODELS[$("model").value];
+  return !chosen || !modelInfo[chosen.name] || modelInfo[chosen.name].loaded;
+}
+
+// Rebuilds the model selector from what the board reports, keeping the current choice.
+function showModels(all) {
+  modelInfo = all.models;
+  $("gamesLink").hidden = !all.models.dino;
+  const select = $("model"), previous = select.value;
+  MODELS = {};
+  select.replaceChildren();
+  for (const [name, info] of Object.entries(all.models)) {
+    const [title, about] = CHECKPOINTS[info.checkpoint] || [info.checkpoint || name, ""];
+    const sizes = info.loaded ? info.loaded_seq_lens : info.seq_lens;
+    const group = el("optgroup", { label: title + (info.loaded ? "" : " (not loaded)") });
+    const add = (key, label, request, note) => {
+      MODELS[key] = { request: { model: name, ...request }, note: about + " " + note, name, title };
+      group.append(el("option", { value: key, textContent: label }));
+    };
+    if (sizes.length > 1) {
+      add(name, `${title} \u00b7 auto`, {}, `Each question runs on the smallest of the ${sizes.join(" / ")}-token graphs it fits in.`);
+      for (const size of sizes) {
+        add(`${name}@${size}`, `${title} \u00b7 ${size}-token graph`, { seq_len: size },
+            `Every question runs on the ${size}-token graph; longer inputs are cut to fit.`);
+      }
+    } else {
+      add(name, `${title} \u00b7 ${sizes[0]} tokens`, {}, `Inputs longer than ${sizes[0]} tokens are cut to fit.`);
+    }
+    select.append(group);
+  }
+  MODELS.auto = MODELS.general;
+  select.value = previous in MODELS ? previous : (previous.split("@")[0] in MODELS ? previous.split("@")[0] : "general");
+  describeModel();
+}
+
+function describeModel() {
+  const chosen = MODELS[$("model").value], info = modelInfo[chosen.name];
+  $("modelNote").textContent = chosen.note;
+  $("loadBar").hidden = info.loaded;
+  $("loadText").textContent = `${chosen.title} is not on the MLA.`;
+  const chip = (text) => el("span", { className: "chip", textContent: text });
+  $("chips").replaceChildren(
+    chip(`hidden ${info.hidden_size}`),
+    chip("weights " + (info.precision === "BF16" ? "bf16" : info.precision)),
+    chip("1 MLA ELF per graph, 0 CPU layers"));
+}
+
+async function refreshModels() {
+  showModels(await (await fetch("/api/info")).json());
+}
+
+$("model").onchange = () => { describeModel(); if (isLoaded()) decide(); else clearResults("Load the model to get decisions from it."); };
+$("loadButton").onclick = async () => {
+  const chosen = MODELS[$("model").value], button = $("loadButton");
+  button.disabled = true; button.textContent = "Loading\u2026";
+  let body;
+  try {
+    body = await (await fetch("/api/models/load", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                    body: JSON.stringify({ model: chosen.name }) })).json();
+  } catch (error) {
+    body = { error: "The board did not answer: " + error.message };
+  }
+  button.disabled = false; button.textContent = "Load model";
+  if (body.error) { $("error").hidden = false; $("error").className = "error"; $("error").textContent = body.error; return; }
+  showModels(body);
+  decide();
+};
+
+refreshModels().catch(() => {}).finally(startBlank);
+
+
+</script>
+</body>
+</html>

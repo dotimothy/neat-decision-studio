@@ -1,0 +1,8 @@
+# Checkpoints, compiler output and local environments
+/models/
+/build/
+/.venv-ref/
+/.venv-train/
+# Upstream Laya, cloned for the PyTorch reference only (see README)
+/third_party/
+__pycache__/

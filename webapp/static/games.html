@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dino Arena &middot; Laya on Modalix</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f4b; --warn: #b45309; --bad: #c0362c;
+    --track: #e8ebf1; --chip: #eef2f8; --field: #ffffff; --sky: #f9fafc; --you: #b45309;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebf0; --muted: #98a2b3; --line: #2a303a;
+      --accent: #5b9dff; --accent-ink: #0b1220; --good: #4cc38a; --warn: #f0a84b; --bad: #f47067;
+      --track: #232934; --chip: #1f252e; --field: #11151a; --sky: #12161b; --you: #f0a84b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 18px 24px 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid transparent; font-size: 14px; }
+  nav a:hover { border-color: var(--line); }
+  nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
+  main { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 16px;
+         padding: 0 24px 32px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 0 16px 24px; }
+                              header { padding: 16px 16px 10px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  canvas { display: block; width: 100%; border-radius: 8px; background: var(--sky);
+           border: 1px solid var(--line); touch-action: manipulation; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .controls { margin-top: 12px; justify-content: space-between; }
+  .hint { color: var(--muted); font-size: 13.5px; }
+  kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+        padding: 1px 6px; background: var(--chip); color: var(--ink); }
+  button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--chip); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-variant-numeric: tabular-nums; font-size: 16px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero .value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .hero .unit { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+        font: 12.5px/1.4 var(--mono); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bar { display: grid; grid-template-columns: 48px minmax(0, 1fr) 52px; gap: 8px; align-items: center;
+         margin-top: 6px; font-size: 13.5px; }
+  .bar .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .bar.top .track i { opacity: 1; }
+  .bar.top .name { font-weight: 650; }
+  .bar .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .block { margin-top: 16px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px; }
+  .slider-head { display: flex; justify-content: space-between; font-size: 13.5px; }
+  .slider-head b { font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .error { color: var(--bad); margin-top: 10px; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Dino Arena</h1>
+  <p>Laya decides run, jump or duck on the Modalix MLA, about 45 times a second</p>
+  <nav><a href="/">Questions</a><a class="here" href="/games">Games</a><a href="/models">Models</a></nav>
+</header>
+<main>
+  <section>
+    <h2>Arena</h2>
+    <canvas id="arena" width="900" height="360" aria-label="Two lanes: Laya on top, you below"></canvas>
+    <div class="row controls">
+      <span class="hint" id="hint"><kbd>Space</kbd> to race Laya &middot; <kbd>&uarr;</kbd> jump &middot; <kbd>&darr;</kbd> duck</span>
+      <span class="row">
+        <button class="primary" id="load" hidden>Load game model</button>
+        <button id="unload" hidden>Unload model</button>
+        <button id="pause">Pause</button>
+        <button class="primary" id="race">Race Laya</button>
+      </span>
+    </div>
+    <div class="scores">
+      <div class="stat"><b id="layaCleared">0</b><span>Laya: obstacles cleared</span></div>
+      <div class="stat"><b id="layaCrashes">0</b><span>Laya: crashes</span></div>
+      <div class="stat"><b id="youCleared">&ndash;</b><span>You: obstacles cleared</span></div>
+      <div class="stat"><b id="youBest">&ndash;</b><span>You: best run</span></div>
+    </div>
+    <div class="error" id="error" hidden></div>
+  </section>
+
+  <section>
+    <h2>Laya's reflexes</h2>
+    <div class="hero"><span class="value" id="mlaMs">&ndash;</span><span class="unit">ms on the MLA per decision</span></div>
+    <div class="stats">
+      <div class="stat"><b id="rate">&ndash;</b><span>decisions per second</span></div>
+      <div class="stat"><b id="trip">&ndash;</b><span>browser round trip</span></div>
+      <div class="stat"><b id="count">0</b><span>decisions made</span></div>
+      <div class="stat"><b id="model">&ndash;</b><span>model on the MLA</span></div>
+    </div>
+
+    <div class="block">
+      <h2>What it sees</h2>
+      <pre id="sees">&ndash;</pre>
+    </div>
+    <div class="block">
+      <h2>What it decides</h2>
+      <div id="probs"></div>
+    </div>
+    <div class="block">
+      <h2>Slow it down</h2>
+      <div class="slider-head"><span>Extra delay per decision</span><b id="delayValue">0 ms</b></div>
+      <input type="range" id="delay" min="0" max="500" step="10" value="0" aria-label="Extra delay per decision in milliseconds">
+      <p class="note">The same policy with a slower model: every decision arrives this much later.
+        Past about 150 ms the dinosaur starts running into things.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+// ---------------------------------------------------------------------------------------------
+// Game harness. A game is an object with reset(seed), step(dt, action), observe() and
+// draw(ctx, view); `QUESTION` and `observe()` are what the model is asked. The physics constants
+// must match games/dino_policy.py, which labels the fine-tuning set from the same numbers.
+// ---------------------------------------------------------------------------------------------
+const PHYSICS = { dinoWidth: 0.6, obstacleWidth: 0.6, jumpSeconds: 0.6, jumpHeight: 2.2, cactusHeight: 1.0,
+                  maxDistance: 20, passedDistance: -1, speeds: { slow: 10, medium: 13, fast: 16 },
+                  spawnAt: 26, dinoTall: 1.6, dinoDucked: 0.8,
+                  // Whole-cell distances at which an obstacle is arriving "now": for a cactus,
+                  // the window in which starting a jump clears it at that speed.
+                  jumpWindows: { slow: [2, 3], medium: [2, 5], fast: [2, 6] }, birdWindow: [0, 3],
+                  lowBird: [1.0, 1.8], highBird: [2.6, 3.2] };
+const QUESTION = { type: "choice", instructions: "What should the dinosaur do?", criteria: ["run", "jump", "duck"] };
+const STEP = 1 / 120;
+
+function mulberry32(seed) {
+  return () => {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+class DinoWorld {
+  constructor(seed) { this.reset(seed); }
+
+  reset(seed) {
+    this.random = mulberry32(seed);
+    this.time = 0; this.jumpTime = -1; this.ducking = false; this.alive = true;
+    this.cleared = 0; this.travelled = 0; this.obstacles = []; this.gap = 0;
+  }
+
+  speedName() { return this.time < 15 ? "slow" : this.time < 35 ? "medium" : "fast"; }
+
+  height() {
+    if (this.jumpTime < 0) return 0;
+    const u = this.jumpTime / PHYSICS.jumpSeconds;
+    return 4 * PHYSICS.jumpHeight * u * (1 - u);
+  }
+
+  // Returns true if `action` started a jump, so the caller can treat a jump as one-shot.
+  step(dt, action) {
+    if (!this.alive) return false;
+    const speed = PHYSICS.speeds[this.speedName()];
+    this.time += dt;
+    this.travelled += speed * dt;
+    let jumped = false;
+    if (this.jumpTime >= 0) {
+      this.jumpTime += dt;
+      if (this.jumpTime >= PHYSICS.jumpSeconds) this.jumpTime = -1;
+    }
+    if (action === "jump" && this.jumpTime < 0) { this.jumpTime = 0; jumped = true; }
+    this.ducking = action === "duck" && this.jumpTime < 0;
+
+    for (const o of this.obstacles) {
+      o.x -= speed * dt;
+      if (!o.passed && o.x + PHYSICS.obstacleWidth < 0) { o.passed = true; this.cleared++; }
+    }
+    this.obstacles = this.obstacles.filter((o) => o.x > -4);
+    const last = this.obstacles[this.obstacles.length - 1];
+    if (!last || last.x <= PHYSICS.spawnAt - this.gap) {
+      const roll = this.random();
+      this.obstacles.push({ kind: roll < 0.55 ? "cactus" : roll < 0.8 ? "low bird" : "high bird",
+                            x: PHYSICS.spawnAt, passed: false });
+      // Room to land and get ready, plus a random stretch.
+      this.gap = speed * (PHYSICS.jumpSeconds + 0.45) + this.random() * 9;
+    }
+
+    const feet = this.height();
+    const head = feet + (this.ducking ? PHYSICS.dinoDucked : PHYSICS.dinoTall);
+    for (const o of this.obstacles) {
+      if (o.x >= PHYSICS.dinoWidth || o.x + PHYSICS.obstacleWidth <= 0) continue;
+      const [low, high] = o.kind === "cactus" ? [0, PHYSICS.cactusHeight]
+                        : o.kind === "low bird" ? PHYSICS.lowBird : PHYSICS.highBird;
+      if (feet < high && head > low) { this.alive = false; this.hit = o.kind; }
+    }
+    return jumped;
+  }
+
+  // The nearest obstacle that has not yet gone by, described in words: what it is and whether
+  // it is far, arriving now or already passing. Choosing the action is left to the model.
+  observe() {
+    for (const o of this.obstacles) {
+      const distance = Math.round(o.x - PHYSICS.dinoWidth);
+      if (distance < PHYSICS.passedDistance) continue;
+      if (distance > PHYSICS.maxDistance) break;
+      const speed = this.speedName();
+      const [lo, hi] = o.kind === "cactus" ? PHYSICS.jumpWindows[speed] : PHYSICS.birdWindow;
+      return { obstacle: o.kind, timing: distance > hi ? "far" : distance >= lo ? "now" : "passing", speed };
+    }
+    return { obstacle: "none", timing: "far", speed: this.speedName() };
+  }
+
+  draw(ctx, view) {
+    const { left, ground, cell, width, color, label, body } = view;
+    const px = (cells) => left + cells * cell;
+    ctx.strokeStyle = color.line; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, ground + 1); ctx.lineTo(width, ground + 1); ctx.stroke();
+    // Ground speckles scroll with the distance travelled.
+    ctx.fillStyle = color.line;
+    for (let i = 0; i < 40; i++) {
+      const x = ((i * 2.37 - this.travelled) % 34 + 34) % 34 - 3;
+      ctx.fillRect(px(x), ground + 6 + (i % 3) * 4, cell * 0.25, 2);
+    }
+
+    for (const o of this.obstacles) {
+      const x = px(o.x), w = PHYSICS.obstacleWidth * cell;
+      if (o.kind === "cactus") {
+        ctx.fillStyle = color.good;
+        const h = PHYSICS.cactusHeight * cell;
+        roundRect(ctx, x + w * 0.3, ground - h, w * 0.4, h, 3);
+        roundRect(ctx, x, ground - h * 0.75, w * 0.25, h * 0.4, 3);
+        roundRect(ctx, x + w * 0.75, ground - h * 0.9, w * 0.25, h * 0.45, 3);
+      } else {
+        const [low, high] = o.kind === "low bird" ? PHYSICS.lowBird : PHYSICS.highBird;
+        const mid = ground - (low + high) / 2 * cell;
+        const flap = Math.sin(this.time * 14 + o.x) * cell * 0.28;
+        ctx.fillStyle = o.kind === "low bird" ? color.bad : color.muted;
+        roundRect(ctx, x, mid - cell * 0.14, w, cell * 0.28, 4);
+        ctx.beginPath(); ctx.moveTo(x + w * 0.2, mid); ctx.lineTo(x + w * 0.55, mid - cell * 0.35 - flap);
+        ctx.lineTo(x + w * 0.8, mid); ctx.fill();
+      }
+    }
+
+    // The dinosaur.
+    const tall = (this.ducking ? PHYSICS.dinoDucked : PHYSICS.dinoTall) * cell;
+    const w = PHYSICS.dinoWidth * cell, x = px(0), top = ground - this.height() * cell - tall;
+    ctx.fillStyle = this.alive ? body : color.muted;
+    roundRect(ctx, x, top + tall * 0.3, w, tall * 0.55, 5);                       // torso
+    roundRect(ctx, x + w * 0.35, top, w * (this.ducking ? 1.0 : 0.85), tall * 0.38, 5);  // head
+    roundRect(ctx, x - w * 0.35, top + tall * 0.42, w * 0.45, tall * 0.16, 4);    // tail
+    const stride = this.jumpTime < 0 && this.alive ? Math.sin(this.time * 22) : 0;
+    const feet = ground - this.height() * cell;
+    roundRect(ctx, x + w * 0.12, feet - tall * 0.18 - Math.max(0, stride) * 4, w * 0.24, tall * 0.18, 2);
+    roundRect(ctx, x + w * 0.6, feet - tall * 0.18 - Math.max(0, -stride) * 4, w * 0.24, tall * 0.18, 2);
+    ctx.fillStyle = color.sky;
+    ctx.beginPath(); ctx.arc(x + w * 0.95, top + tall * 0.14, Math.max(2, cell * 0.07), 0, 6.3); ctx.fill();
+
+    ctx.fillStyle = color.muted; ctx.font = `600 ${Math.round(cell * 0.5)}px system-ui, sans-serif`;
+    ctx.textBaseline = "top"; ctx.textAlign = "left";
+    ctx.fillText(label, 12, view.top + 10);
+    ctx.textAlign = "right";
+    ctx.fillText(`${this.cleared} cleared · ${this.speedName()}`, width - 12, view.top + 10);
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Arena: Laya's lane is driven by the model, the other lane by the keyboard.
+// ---------------------------------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const canvas = $("arena"), ctx = canvas.getContext("2d");
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+let seed = Date.now() & 0xffff;
+const laya = { world: new DinoWorld(seed), action: "run", crashes: 0, restartAt: 0 };
+const you = { world: null, action: "run", best: 0, keys: { jump: false, duck: false } };
+let paused = false, lastFrame = performance.now(), carry = 0;
+let ready = false;        // the game model is on the MLA; nothing moves until it is
+let looping = false;
+const recent = [];        // {at, mla, trip} of the last decisions
+let decisions = 0;
+
+function startRace() {
+  seed = (seed * 31 + 7) & 0xffff;
+  laya.world.reset(seed); laya.action = "run";
+  you.world = new DinoWorld(seed); you.action = "run";
+  $("hint").innerHTML = "<kbd>Space</kbd> or <kbd>&uarr;</kbd> jump &middot; <kbd>&darr;</kbd> duck";
+  $("race").textContent = "Restart race";
+  canvas.focus();
+}
+
+async function decideLoop() {
+  if (looping) return;
+  looping = true;
+  for (;;) {
+    if (!ready) break;
+    if (paused || !laya.world.alive) { await sleep(40); continue; }
+    const seen = laya.world.observe();
+    const sent = performance.now();
+    let body;
+    try {
+      const response = await fetch("/api/predict", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "dino", state: seen, questions: { action: QUESTION } }) });
+      body = await response.json();
+    } catch (error) {
+      body = { error: "The board did not answer: " + error.message };
+    }
+    if (body.not_loaded) { setReady(false); break; }   // unloaded from the Models page
+    $("error").hidden = !body.error;
+    if (body.error) { $("error").textContent = body.error; await sleep(1000); continue; }
+    const trip = performance.now() - sent;
+    const extra = Number($("delay").value);
+    if (extra) await sleep(extra);
+    const answer = body.answers.action;
+    laya.action = answer.choice;
+    decisions++;
+    recent.push({ at: performance.now(), mla: body.usage.mla_ms, trip });
+    while (recent.length > 60) recent.shift();
+    showDecision(seen, answer);
+  }
+  looping = false;
+}
+
+// The arena only runs while the game model is loaded. Loading is a deliberate click.
+function setReady(value) {
+  ready = value;
+  $("load").hidden = value;
+  $("unload").hidden = !value;
+  $("race").disabled = $("pause").disabled = !value;
+  if (value) {
+    laya.world.reset(seed); laya.action = "run"; you.world = null;
+    lastFrame = performance.now(); carry = 0;
+    decideLoop();
+  }
+}
+
+async function manage(action) {
+  const button = $(action);
+  const label = button.textContent;
+  button.disabled = true; button.textContent = action === "load" ? "Loading\u2026" : "Unloading\u2026";
+  let body;
+  try {
+    body = await (await fetch("/api/models/" + action, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                         body: JSON.stringify({ model: "dino" }) })).json();
+  } catch (error) {
+    body = { error: "The board did not answer: " + error.message };
+  }
+  button.disabled = false; button.textContent = label;
+  $("error").hidden = !body.error;
+  if (body.error) { $("error").textContent = body.error; return; }
+  setReady(body.models.dino.loaded);
+}
+
+function showDecision(seen, answer) {
+  $("sees").textContent = JSON.stringify(seen).replaceAll(",", ", ").replaceAll(":", ": ");
+  const root = $("probs");
+  if (!root.children.length) {
+    for (const name of QUESTION.criteria) {
+      const row = document.createElement("div"); row.className = "bar"; row.dataset.name = name;
+      row.innerHTML = '<span class="name"></span><span class="track"><i></i></span><span class="pct"></span>';
+      row.querySelector(".name").textContent = name;
+      root.append(row);
+    }
+  }
+  for (const row of root.children) {
+    const p = answer.probabilities[row.dataset.name];
+    row.classList.toggle("top", row.dataset.name === answer.choice);
+    row.querySelector("i").style.width = (p * 100).toFixed(1) + "%";
+    row.querySelector(".pct").textContent = (p * 100).toFixed(1) + "%";
+  }
+}
+
+function showStats(now) {
+  if (recent.length) {
+    const mean = (key) => recent.reduce((sum, r) => sum + r[key], 0) / recent.length;
+    $("mlaMs").textContent = mean("mla").toFixed(1);
+    $("trip").textContent = mean("trip").toFixed(0) + " ms";
+    const lastSecond = recent.filter((r) => now - r.at < 1000).length;
+    $("rate").textContent = lastSecond;
+  }
+  $("count").textContent = decisions.toLocaleString();
+  $("layaCleared").textContent = laya.world.cleared;
+  $("layaCrashes").textContent = laya.crashes;
+  if (you.world) {
+    $("youCleared").textContent = you.world.cleared;
+    $("youBest").textContent = Math.max(you.best, you.world.cleared);
+  }
+}
+
+function tick(dt, now) {
+  if (laya.world.alive) {
+    // A jump is consumed by the world: one decision, one jump.
+    if (laya.world.step(dt, laya.action)) laya.action = "run";
+    if (!laya.world.alive) { laya.crashes++; laya.restartAt = now + 1800; }
+  } else if (now >= laya.restartAt && !(you.world && you.world.alive)) {
+    laya.world.reset(seed = (seed * 31 + 7) & 0xffff); laya.action = "run";
+  }
+  if (you.world && you.world.alive) {
+    const action = you.keys.duck ? "duck" : you.keys.jump ? "jump" : "run";
+    you.world.step(dt, action);
+    if (!you.world.alive) {
+      you.best = Math.max(you.best, you.world.cleared);
+      $("hint").innerHTML = `You hit a ${you.world.hit} after ${you.world.cleared}. <kbd>Space</kbd> to race again`;
+    }
+  }
+}
+
+function palette() {
+  const css = getComputedStyle(document.documentElement);
+  const get = (name) => css.getPropertyValue(name).trim();
+  return { line: get("--line"), muted: get("--muted"), good: get("--good"), bad: get("--bad"),
+           sky: get("--sky"), accent: get("--accent"), you: get("--you"), ink: get("--ink") };
+}
+let color = palette();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { color = palette(); });
+
+function resize() {
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth, height = Math.round(Math.min(380, Math.max(260, width * 0.42)));
+  canvas.style.height = height + "px";
+  canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+}
+addEventListener("resize", resize);
+
+function draw() {
+  const width = canvas.clientWidth, height = canvas.clientHeight, lane = height / 2;
+  const cell = Math.min(width / 28, lane / 5.2);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = color.line; ctx.fillRect(0, lane, width, 1);
+  const view = (top, label, body) => ({ left: cell * 2.2, top, ground: top + lane - cell * 0.9, cell, width, color, label, body });
+  laya.world.draw(ctx, view(0, "LAYA · MLA", color.accent));
+  if (!ready) {
+    ctx.fillStyle = color.sky; ctx.globalAlpha = 0.82; ctx.fillRect(0, 0, width, height); ctx.globalAlpha = 1;
+    ctx.fillStyle = color.ink; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = `600 ${Math.round(cell * 0.7)}px system-ui, sans-serif`;
+    ctx.fillText("The game model is not loaded", width / 2, height / 2 - cell * 0.5);
+    ctx.fillStyle = color.muted; ctx.font = `${Math.round(cell * 0.52)}px system-ui, sans-serif`;
+    ctx.fillText("Press \u201cLoad game model\u201d to put it on the MLA and start", width / 2, height / 2 + cell * 0.5);
+    return;
+  }
+  if (you.world) {
+    you.world.draw(ctx, view(lane, "YOU", color.you));
+  } else {
+    ctx.fillStyle = color.muted; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = `${Math.round(cell * 0.6)}px system-ui, sans-serif`;
+    ctx.fillText("Press Space to race Laya on the same course", width / 2, lane * 1.5);
+  }
+  if (!laya.world.alive) {
+    ctx.fillStyle = color.bad; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = `600 ${Math.round(cell * 0.6)}px system-ui, sans-serif`;
+    ctx.fillText(`Laya hit a ${laya.world.hit}`, width / 2, lane * 0.45);
+  }
+}
+
+function frame(now) {
+  const elapsed = Math.min(0.1, (now - lastFrame) / 1000);
+  lastFrame = now;
+  if (!paused && ready) {
+    carry += elapsed;
+    while (carry >= STEP) { tick(STEP, now); carry -= STEP; }
+  }
+  draw();
+  showStats(now);
+  requestAnimationFrame(frame);
+}
+
+addEventListener("keydown", (event) => {
+  if (event.target.tagName === "INPUT" && event.code !== "Space") return;
+  if (event.code === "Space" || event.code === "ArrowUp") {
+    event.preventDefault();
+    if (!ready) return;
+    if (!you.world || !you.world.alive) { if (event.code === "Space" && !event.repeat) startRace(); }
+    else you.keys.jump = true;
+  } else if (event.code === "ArrowDown") { event.preventDefault(); you.keys.duck = true; }
+});
+addEventListener("keyup", (event) => {
+  if (event.code === "Space" || event.code === "ArrowUp") you.keys.jump = false;
+  else if (event.code === "ArrowDown") you.keys.duck = false;
+});
+// Touch: tap the arena to join or jump, hold its lower half to duck.
+canvas.addEventListener("pointerdown", (event) => {
+  if (!ready) return;
+  if (!you.world || !you.world.alive) return startRace();
+  const lower = event.offsetY > canvas.clientHeight * 0.75;
+  you.keys[lower ? "duck" : "jump"] = true;
+});
+addEventListener("pointerup", () => { you.keys.jump = you.keys.duck = false; });
+
+$("race").onclick = startRace;
+$("pause").onclick = () => { paused = !paused; $("pause").textContent = paused ? "Resume" : "Pause"; };
+$("delay").oninput = () => { $("delayValue").textContent = $("delay").value + " ms"; };
+
+$("load").onclick = () => manage("load");
+$("unload").onclick = () => manage("unload");
+fetch("/api/info").then((r) => r.json()).then((info) => {
+  const dino = info.models.dino;
+  if (!dino) {
+    $("error").hidden = false;
+    $("error").textContent = "No game model is deployed. Deploy one with bin/laya-deploy --game and restart run.sh.";
+    $("race").disabled = $("pause").disabled = true;
+    return;
+  }
+  $("model").textContent = (dino.precision === "BF16" ? "bf16" : "int8") + " \u00b7 " + dino.seq_lens[0] + " tok";
+  setReady(dino.loaded);
+}).catch(() => {});
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

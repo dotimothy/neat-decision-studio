@@ -1,0 +1,396 @@
+#!/usr/bin/env python3
+"""Laya decision playground: a web front end for the Laya runtime on a Modalix DevKit.
+
+Runs on the board with nothing but the Python standard library. It keeps one `laya serve`
+process alive per model, so the compiled graphs stay loaded on the MLA, and forwards each
+browser request to one of them as one JSON line.
+
+Two harnesses share it:
+
+    /        question answering, against any of the question models
+    /games   games played by a model specialized for them (`--game-model`)
+
+    /models  the model manager: what is on the MLA, with load and unload
+
+Models are loaded and unloaded only on request (the Models page, or the Load buttons the
+other pages show when their model is missing); `--preload` chooses what is loaded at startup.
+
+    python3 webapp/server.py --model /media/nvme/laya/model --laya /media/nvme/laya/laya
+"""
+import argparse
+import json
+import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+STATIC = Path(__file__).resolve().parent / "static"
+MAX_BODY = 1 << 20
+
+
+class RuntimeDied(RuntimeError):
+    pass
+
+
+class LayaProcess:
+    """One `laya serve` child. The MLA runs one graph at a time, so requests are serialized."""
+
+    def __init__(self, laya: str, model: str, seq_lens: str | None):
+        self._command = [laya, "serve", model] + (["--seq-lens", seq_lens] if seq_lens else [])
+        self._lock = threading.Lock()
+        self._proc = None
+        self._log: list[str] = []
+        self.info: dict = {}
+
+    def _read_json_line(self) -> dict:
+        """Next JSON document from the child; the MLA libraries also log to stdout."""
+        while True:
+            line = self._proc.stdout.readline()
+            if not line:
+                tail = " | ".join(self._log[-4:]) or "no output"
+                raise RuntimeDied(f"the Laya runtime exited ({self._proc.wait()}): {tail}")
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    pass
+            if line:
+                self._log = (self._log + [line])[-20:]
+
+    def _start(self):
+        self._proc = subprocess.Popen(
+            self._command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
+        self.info = self._read_json_line()
+
+    def start(self):
+        with self._lock:
+            self._start()
+
+    def request(self, payload: dict) -> dict:
+        with self._lock:
+            if not self.running:
+                raise RuntimeDied("the Laya runtime is not running")
+            try:
+                self._proc.stdin.write(json.dumps(payload) + "\n")
+                self._proc.stdin.flush()
+                return self._read_json_line()
+            except BrokenPipeError as error:
+                raise RuntimeDied("the Laya runtime closed its input") from error
+
+    @property
+    def running(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def stop(self):
+        with self._lock:
+            if self.running:
+                # Closing stdin ends `laya serve` cleanly, which releases the model on the MLA.
+                self._proc.stdin.close()
+                try:
+                    self._proc.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    self._proc.terminate()
+            self._proc = None
+
+
+class NotLoaded(RuntimeError):
+    pass
+
+
+class Refused(RuntimeError):
+    pass
+
+
+class Model:
+    """One compiled model directory and, while it is loaded, the runtime process holding it."""
+
+    def __init__(self, name: str, path: str, laya: str, allowed: str | None):
+        self.name, self.path, self._laya = name, Path(path), laya
+        self.config = json.loads((self.path / "laya_config.json").read_text())
+        sizes = sorted(int(s) for s in self.config["elfs"])
+        if allowed:
+            wanted = {int(s) for s in allowed.split(",")}
+            sizes = [s for s in sizes if s in wanted]
+        self.seq_lens = sizes                 # graphs this app may load
+        self.loaded_seq_lens: list[int] = []
+        self.state = "unloaded"               # unloaded | loading | loaded
+        self.process: LayaProcess | None = None
+
+    def graph_bytes(self, seq_len: int) -> int:
+        return (self.path / self.config["elfs"][str(seq_len)]).stat().st_size
+
+    def fixed_bytes(self) -> int:
+        """What the runtime holds besides graphs: the embedding table and the tokenizer."""
+        return sum((self.path / self.config[key]).stat().st_size for key in ("token_embeddings", "tokenizer"))
+
+    def describe(self) -> dict:
+        return {
+            "checkpoint": self.config.get("model"), "precision": self.config.get("precision"),
+            "max_len": self.config.get("max_len"), "hidden_size": self.config.get("hidden_size"),
+            "graphs": [{"seq_len": s, "bytes": self.graph_bytes(s)} for s in self.seq_lens],
+            "seq_lens": self.seq_lens, "fixed_bytes": self.fixed_bytes(),
+            "state": self.state, "loaded": self.state == "loaded",
+            "loaded_seq_lens": self.loaded_seq_lens,
+        }
+
+
+def memory_available() -> int:
+    for line in Path("/proc/meminfo").read_text().splitlines():
+        if line.startswith("MemAvailable:"):
+            return int(line.split()[1]) * 1024
+    return 0
+
+
+def mla_memory_total() -> int:
+    """Size of the memory region reserved for MLA models (the device tree's `dms` node).
+
+    Compiled graphs are loaded there, not into Linux RAM, so loading one barely moves
+    MemAvailable. The region is shared by every application that uses the MLA.
+    """
+    for node in Path("/sys/firmware/devicetree/base/reserved-memory").glob("dms@*"):
+        try:
+            reg = (node / "reg").read_bytes()
+            return int.from_bytes(reg[8:16], "big")
+        except OSError:
+            pass
+    return 0
+
+
+class ModelManager:
+    """Loads and unloads models on request. Nothing is loaded or evicted behind the user's back."""
+
+    # Linux RAM kept free after a load, on top of the embedding table and tokenizer it brings.
+    HEADROOM = 600 << 20
+
+    def __init__(self, models: dict[str, Model]):
+        self.models = models
+        self._admin = threading.Lock()   # one load or unload at a time
+        self._mla_total = mla_memory_total()
+
+    def describe(self) -> dict:
+        total = int(Path("/proc/meminfo").read_text().split()[1]) * 1024
+        return {"models": {name: model.describe() for name, model in self.models.items()},
+                "memory": {"available_bytes": memory_available(), "total_bytes": total,
+                           "mla_total_bytes": self._mla_total, "mla_loaded_bytes": self._loaded_bytes()}}
+
+    def _loaded_bytes(self) -> int:
+        """Graph bytes this app has on the MLA. Other applications' models are not visible here."""
+        return sum(model.graph_bytes(s) for model in self.models.values() for s in model.loaded_seq_lens)
+
+    def load(self, name: str, seq_lens: list[int] | None = None):
+        model = self.models[name]
+        wanted = sorted(set(seq_lens)) if seq_lens else list(model.seq_lens)
+        if not wanted or any(s not in model.seq_lens for s in wanted):
+            raise Refused(f"{name} has graphs for {model.seq_lens} tokens, not {wanted}")
+        with self._admin:
+            if model.state == "loaded" and model.loaded_seq_lens == wanted:
+                return
+            self._unload(model)
+            # A load that cannot be satisfied fails halfway and leaves memory held by the MLA
+            # server until the MLA services are reset, so refuse what plainly cannot fit.
+            graphs = sum(model.graph_bytes(s) for s in wanted)
+            if self._mla_total and self._loaded_bytes() + graphs > self._mla_total:
+                raise Refused(
+                    f"{name} does not fit: its graphs take {graphs >> 20} MB and this app already "
+                    f"has {self._loaded_bytes() >> 20} MB of the MLA's {self._mla_total >> 20} MB "
+                    "loaded. Unload another model first.")
+            if memory_available() < model.fixed_bytes() + self.HEADROOM:
+                raise Refused(
+                    f"not enough board memory for {name}'s embedding table "
+                    f"({memory_available() >> 20} MB available). Unload another model first.")
+            model.state = "loading"
+            process = LayaProcess(model._laya, str(model.path), ",".join(map(str, wanted)))
+            try:
+                process.start()
+            except (RuntimeDied, OSError):
+                model.state = "unloaded"
+                raise
+            model.process, model.loaded_seq_lens, model.state = process, wanted, "loaded"
+
+    def _unload(self, model: Model):
+        if model.process is not None:
+            model.process.stop()   # waits for a request in flight
+        model.process, model.loaded_seq_lens, model.state = None, [], "unloaded"
+
+    def unload(self, name: str):
+        with self._admin:
+            self._unload(self.models[name])
+
+    def request(self, name: str, payload: dict) -> dict:
+        model = self.models[name]
+        process = model.process
+        if model.state != "loaded" or process is None:
+            raise NotLoaded(f"the {name} model is not loaded")
+        if not process.running:
+            self.unload(name)
+            raise RuntimeDied(f"the {name} model's runtime has stopped; load it again")
+        return process.request(payload)
+
+    def stop(self):
+        for model in self.models.values():
+            self._unload(model)
+
+
+PAGES = {"/": "index.html", "/index.html": "index.html", "/games": "games.html",
+         "/models": "models.html"}
+
+
+def make_handler(manager: ModelManager):
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        # Headers and body must leave in one segment: sent separately, Nagle's algorithm holds
+        # the body until the client's delayed ACK, which adds 40 ms to a 19 ms decision.
+        wbufsize = 64 * 1024
+
+        def setup(self):
+            super().setup()
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+        def log_message(self, fmt, *args):
+            pass
+
+        def _send(self, status: int, body: bytes, content_type: str):
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+
+        def _json(self, status: int, payload: dict):
+            self._send(status, json.dumps(payload).encode(), "application/json")
+
+        def do_GET(self):
+            path = self.path.split("?", 1)[0]
+            if path in PAGES:
+                self._send(200, (STATIC / PAGES[path]).read_bytes(), "text/html; charset=utf-8")
+            elif path == "/api/info":
+                self._json(200, manager.describe())
+            else:
+                self._json(404, {"error": "not found"})
+
+        def _body(self) -> dict | None:
+            """The request's JSON object, or None after an error response has been sent."""
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= MAX_BODY:
+                    self._json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "request body too large"})
+                    return None
+                request = json.loads(self.rfile.read(length))
+            except (ValueError, json.JSONDecodeError):
+                self._json(400, {"error": "the request body is not valid JSON"})
+                return None
+            if not isinstance(request, dict):
+                self._json(400, {"error": "expected a JSON object"})
+                return None
+            name = request.get("model", "general")
+            if name not in manager.models:
+                self._json(404, {"error": f"there is no model named {name!r}"})
+                return None
+            request["model"] = name
+            return request
+
+        def do_POST(self):
+            if self.path not in ("/api/predict", "/api/models/load", "/api/models/unload"):
+                return self._json(404, {"error": "not found"})
+            request = self._body()
+            if request is None:
+                return
+            name = request["model"]
+            try:
+                if self.path == "/api/models/load":
+                    seq_lens = request.get("seq_lens")
+                    if seq_lens is not None and not (isinstance(seq_lens, list)
+                                                     and all(isinstance(s, int) for s in seq_lens)):
+                        return self._json(400, {"error": "seq_lens must be a list of integers"})
+                    manager.load(name, seq_lens)
+                    return self._json(200, manager.describe())
+                if self.path == "/api/models/unload":
+                    manager.unload(name)
+                    return self._json(200, manager.describe())
+                if "state" not in request or "questions" not in request:
+                    return self._json(400, {"error": "expected {\"state\": ..., \"questions\": {...}}"})
+                forward = {"state": request["state"], "questions": request["questions"]}
+                if isinstance(request.get("seq_len"), int) and request["seq_len"] > 0:
+                    forward["seq_len"] = request["seq_len"]   # pin one compiled graph
+                start = time.perf_counter()
+                response = manager.request(name, forward)
+            except NotLoaded as error:
+                return self._json(409, {"error": str(error), "not_loaded": name})
+            except Refused as error:
+                return self._json(409, {"error": str(error)})
+            except (RuntimeDied, OSError) as error:
+                return self._json(503, {"error": str(error)})
+            response["server_ms"] = round((time.perf_counter() - start) * 1e3, 3)
+            self._json(400 if "error" in response else 200, response)
+
+    return Handler
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--model", default="/media/nvme/laya/model", help="compiled model directory")
+    ap.add_argument("--laya", default="/media/nvme/laya/laya", help="the laya runtime binary")
+    ap.add_argument("--seq-lens", help="offer only these compiled sequence lengths, e.g. 128,512")
+    ap.add_argument("--game-model", help="compiled model directory for the games page")
+    ap.add_argument("--extra-model", action="append", default=[], metavar="NAME=DIR",
+                    help="another question model (repeatable)")
+    ap.add_argument("--preload", default="general", metavar="NAMES",
+                    help="models to load at startup: a comma-separated list, 'all' or 'none' "
+                         "(default: %(default)s). The rest are loaded from the Models page.")
+    ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--port", type=int, default=8095)
+    args = ap.parse_args()
+
+    sources = {"general": (args.model, args.seq_lens)}
+    for item in args.extra_model:
+        name, _, path = item.partition("=")
+        if not name or not path or name in ("general", "dino"):
+            sys.exit(f"laya webapp: --extra-model needs NAME=DIR with a new name, got {item!r}")
+        sources[name] = (path, args.seq_lens)
+    if args.game_model:
+        sources["dino"] = (args.game_model, None)
+    try:
+        manager = ModelManager({name: Model(name, path, args.laya, allowed)
+                                for name, (path, allowed) in sources.items()})
+    except (OSError, KeyError, json.JSONDecodeError) as error:
+        sys.exit(f"laya webapp: cannot read a model directory: {error}")
+
+    preload = {"all": list(sources), "none": []}.get(args.preload, args.preload.split(","))
+    for name in preload:
+        if name not in manager.models:
+            sys.exit(f"laya webapp: --preload names {name!r}, which is not one of {list(sources)}")
+        try:
+            manager.load(name)
+        except (RuntimeDied, Refused, OSError) as error:
+            manager.stop()
+            sys.exit(f"laya webapp: cannot load the {name} model: {error}")
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(manager))
+
+    def on_sigterm(*_):
+        # Leave through the same path as Ctrl-C, so the runtimes release their models on the MLA.
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, on_sigterm)
+    print(f"Laya playground on http://{args.host}:{args.port}  models: {', '.join(sources)}; "
+          f"loaded: {', '.join(preload) or 'none'}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+        manager.stop()
+
+
+if __name__ == "__main__":
+    main()
