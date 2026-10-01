@@ -268,6 +268,12 @@ trained on. The code is in place but has never been run to completion.
 - The shipped checkpoints' act heads saturate (act probability is 1.0 on everything tried, in
   PyTorch as well), so the act/escalate output carries little information here.
 
+## License
+
+Apache-2.0; see [LICENSE](LICENSE). That covers the code in this repository only. The SiMa
+Model Compiler and the LLiMa libraries it builds on are SiMa.ai's and are licensed separately;
+the Laya checkpoints are upstream's.
+
 ## Attribution
 
 Laya is by Convai Innovations, Apache-2.0: https://github.com/NandhaKishorM/laya. The sequence
