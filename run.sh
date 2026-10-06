@@ -5,9 +5,9 @@
 #   ./run.sh --port 9000         another port
 #   ./run.sh --seq-lens 128      which compiled sequence lengths the app offers
 #                                (default: all of them)
-#   ./run.sh --preload NAMES     models to put on the MLA at startup: a comma-separated list,
-#                                "all" or "none" (default: general). The others, including
-#                                the game model, are loaded from the Models page.
+#   ./run.sh --preload NAME      the model to put on the MLA at startup, or "none" (default:
+#                                general). One model is loaded at a time; another is loaded
+#                                in its place from the pages.
 #   ./run.sh --no-games          leave the game model out altogether
 #   ./run.sh --stop              stop a running app
 #   ./run.sh --reset-mla         reset the board's MLA runtime first (see below)
@@ -86,7 +86,7 @@ if ss -ltn 2> /dev/null | grep -q ":${PORT} "; then
 fi
 
 address="$(hostname -I 2> /dev/null | awk '{print $1}')"
-echo "Starting; the app will be at http://${address:-<board-ip>}:${PORT} (models: /models)"
+echo "Starting; the demo will be at http://${address:-<board-ip>}:${PORT} (models: /models)"
 args=(--model "${MODEL_DIR}" --laya "${APP_DIR}/laya" --port "${PORT}" --preload "${preload}")
 [[ -n "${seq_lens}" && "${seq_lens}" != "all" ]] && args+=(--seq-lens "${seq_lens}")
 # Every other model-<name> directory is a question model the page can switch to.

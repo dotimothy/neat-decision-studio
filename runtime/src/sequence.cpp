@@ -135,10 +135,12 @@ Question parse_question(const json& qdef) {
 
 // [CLS] <type> question: instructions [SEP] [MASK] opt0 [MASK] opt1 ... [SEP] state [SEP]
 Sequence Runtime::build_sequence(const std::vector<uint32_t>& state_ids, const Question& question,
-                                 bool truncate_left, uint32_t limit) const {
+                                 bool truncate_left, uint32_t limit, uint32_t head_limit) const {
   static const char* names[] = {"choice", "score", "noul"};
-  const size_t max_len = std::min<size_t>(_cfg.max_len, limit ? limit : max_tokens());
-  const size_t head_max_len = _cfg.head_max_len;
+  size_t max_len = std::min<size_t>(_cfg.max_len, max_tokens());
+  if (limit) max_len = std::min<size_t>(max_len, limit);
+  // The arithmetic below assumes room for at least a short question.
+  const size_t head_max_len = std::max<size_t>(32, std::min<size_t>(head_limit ? head_limit : _cfg.head_max_len, max_len));
 
   auto head_ids = tokenize(fmt::format("{} question: {}", names[static_cast<int>(question.type)],
                                        replace_all(question.instructions, _cfg.mask_token, " ")));
@@ -186,8 +188,8 @@ Sequence Runtime::build_sequence(const std::vector<uint32_t>& state_ids, const Q
 
   if (seq.markers.size() != question.option_texts.size())
     throw std::invalid_argument(fmt::format(
-        "only {} of the question's {} option markers fit in max_len={} with head_max_len={}; "
-        "use fewer options or compile a longer sequence length",
+        "only {} of the question's {} option markers fit in a token budget of {} (head budget {}); "
+        "raise the token budget or use fewer options",
         seq.markers.size(), question.option_texts.size(), max_len, head_max_len));
   return seq;
 }

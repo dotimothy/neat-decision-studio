@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
 <title>Models &middot; Laya on Modalix</title>
 <style>
   :root {
@@ -38,6 +39,7 @@
   .bar { height: 10px; background: var(--track); border-radius: 999px; overflow: hidden; margin-top: 8px; }
   .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
   .model { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; align-items: start; }
+  .model.wanted { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .model h3 { margin: 0; font-size: 16.5px; }
   .model p { margin: 4px 0 0; color: var(--muted); font-size: 13.5px; }
   .pill { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12.5px;
@@ -51,16 +53,21 @@
   button:hover { border-color: var(--accent); }
   button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
   button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .progress { margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .progress .bar { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; margin-bottom: 4px; }
+  .progress .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
   .error { color: var(--bad); margin: 0; overflow-wrap: anywhere; }
   .note { color: var(--muted); font-size: 13.5px; margin: 0; }
 </style>
+<link rel="stylesheet" href="/static/neat.css">
 </head>
 <body>
 <header>
   <h1>Models</h1>
   <p>What is loaded on the Modalix MLA</p>
-  <nav><a href="/">Questions</a><a href="/games">Games</a><a class="here" href="/models">Models</a></nav>
+  <nav><a href="/">Debate</a><a href="/questions">Questions</a><a href="/games">Games</a><a class="here" href="/models">Models</a></nav>
 </header>
+<script src="/static/brand.js"></script>
 <main>
   <section>
     <h2>MLA model memory</h2>
@@ -72,15 +79,16 @@
   </section>
   <p class="error" id="error" hidden></p>
   <div id="models" style="display:grid; gap:14px"></div>
-  <p class="note">Loading takes 3&ndash;10 seconds per model. Nothing is loaded or unloaded automatically:
-    a page whose model is missing shows a Load button instead of answering.</p>
+  <p class="note">One model is on the MLA at a time: loading a model unloads the one that was there. Loading takes
+    3&ndash;10 seconds. Nothing is loaded on its own: the other pages use whichever model is loaded here, and
+    wait while there is none.</p>
 </main>
 <script>
 const CHECKPOINTS = {
   "laya": ["Laya", "English, ModernBERT-large. The general question model."],
   "laya-typed-decisions": ["Laya typed-decisions", "English, fine-tuned by upstream on typed-decision workflows."],
   "laya-multilingual": ["Laya multilingual", "100+ languages, mmBERT-base: smaller and about twice as fast."],
-  "laya-dino": ["Laya-dino", "Decision head fine-tuned for Dino Arena. Needed by the Games page."],
+  "laya-dino": ["Laya-dino", "Decision head fine-tuned for Dino Arena."],
 };
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
@@ -103,7 +111,7 @@ function render(info) {
   root.replaceChildren();
   for (const [name, model] of Object.entries(info.models)) {
     const [title, about] = CHECKPOINTS[model.checkpoint] || [model.checkpoint || name, ""];
-    const working = busy === name || model.state === "loading";
+    const working = busy === name || model.state === "loading" || model.state === "unloading";
     chosen[name] ??= new Set(model.loaded ? model.loaded_seq_lens : model.seq_lens);
     const graphs = el("div", { className: "graphs" });
     for (const graph of model.graphs) {
@@ -114,30 +122,55 @@ function render(info) {
       graphs.append(el("label", {}, box, `${graph.seq_len} tokens`, el("span", { textContent: mb(graph.bytes) })));
     }
     const need = model.graphs.filter((g) => chosen[name].has(g.seq_len)).reduce((sum, g) => sum + g.bytes, 0) + model.fixed_bytes;
-    const state = working ? (model.loaded ? "unloading" : "loading") : model.state;
+    const state = model.state === "loading" || model.state === "unloading" ? model.state : working ? (model.loaded ? "unloading" : "loading") : model.state;
     const pill = el("span", { className: "pill " + (working ? "loading" : model.state),
                               textContent: working ? state + "…" : model.loaded ? "loaded" : "not loaded" });
+    // Progress comes from the server: real stage boundaries, timed inside a stage.
+    let progress = "";
+    if (model.progress) {
+      const percent = Math.round(model.progress.fraction * 100);
+      const fill = el("i"); fill.style.width = percent + "%";
+      progress = el("div", { className: "progress", role: "progressbar", ariaValueMin: 0, ariaValueMax: 100, ariaValueNow: percent,
+                             ariaLabel: `${state} ${title}` },
+        el("div", { className: "bar" }, fill),
+        el("span", { textContent: `${model.progress.stage} · step ${model.progress.step} of ${model.progress.steps} · ${percent}%` }));
+    }
     const button = el("button", { textContent: model.loaded ? "Unload" : "Load", disabled: working || busy !== null
                                     || (!model.loaded && !chosen[name].size) });
     if (!model.loaded) button.className = "primary";
     button.onclick = () => act(name, model.loaded ? "unload" : "load");
     const detail = model.loaded ? `On the MLA: ${model.loaded_seq_lens.join(", ")}-token graph${model.loaded_seq_lens.length > 1 ? "s" : ""}.`
                                 : `Loading the ticked graphs needs about ${mb(need)}.`;
-    root.append(el("section", { className: "model" },
-      el("div", {}, el("h3", {}, title, pill), el("p", { textContent: about + " " + detail }), graphs),
+    root.append(el("section", { className: "model" + (location.hash === "#" + name ? " wanted" : ""), id: name },
+      el("div", {}, el("h3", {}, title, pill), el("p", { textContent: about + " " + detail }), graphs, progress),
       button));
   }
 }
 
+// Poll gently when nothing is happening and often while a model is loading or unloading, from
+// this page or any other, so the progress bar moves.
 async function refresh() {
-  if (busy) return;
-  try { render(await (await fetch("/api/info")).json()); } catch (_) { /* board unreachable: keep the last view */ }
+  let active = busy !== null;
+  try {
+    const info = await (await fetch("/api/info")).json();
+    render(info);
+    active ||= Object.values(info.models).some((model) => model.progress);
+  } catch (_) { /* board unreachable: keep the last view */ }
+  setTimeout(refresh, active ? 150 : 2000);
+}
+
+// The poll may be in its slow phase when a button is pressed: follow the action until it returns.
+async function refreshSoon() {
+  while (busy !== null) {
+    try { render(await (await fetch("/api/info")).json()); } catch (_) { /* next try */ }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
 }
 
 async function act(name, action) {
   busy = name;
   $("error").hidden = true;
-  render(await (await fetch("/api/info")).json());
+  refreshSoon();
   let body;
   try {
     const request = { model: name };
@@ -149,12 +182,11 @@ async function act(name, action) {
     body = { error: "The board did not answer: " + error.message };
   }
   busy = null;
-  if (body.error) { $("error").hidden = false; $("error").textContent = body.error; return refresh(); }
+  if (body.error) { $("error").hidden = false; $("error").textContent = body.error; return; }
   render(body);
 }
 
 refresh();
-setInterval(refresh, 2000);
 </script>
 </body>
 </html>

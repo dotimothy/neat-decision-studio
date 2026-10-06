@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Laya on Modalix</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
+<title>Questions &middot; Laya on Modalix</title>
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
@@ -42,6 +43,7 @@
        margin: 0 0 10px; font-weight: 600; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .presets { margin-bottom: 14px; }
+  .pagepicker { margin: 0 0 14px; justify-content: flex-start; }
   .qhead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
            gap: 8px; margin-top: 16px; }
   .qhead h2 { margin: 0; }
@@ -53,9 +55,18 @@
   .empty-q { color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 14px;
              margin-top: 10px; }
   .modelrow { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; }
+  .budgetrow { display: flex; align-items: center; gap: 10px; }
+  .budgetrow label { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+                     font-weight: 600; white-space: nowrap; }
+  .budgetrow input[type=range] { flex: 1; min-width: 0; width: auto; margin: 0; accent-color: var(--accent); }
+  .budgetrow input[type=number] { width: 84px; flex: none; font: inherit; color: var(--ink); background: var(--field);
+                                  border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
+  .loadbar[hidden] { display: none; }
   .modelrow label { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em;
                     color: var(--muted); font-weight: 600; }
   .note { color: var(--muted); font-size: 13px; margin: 6px 0 14px; }
+  .loadlink { color: var(--accent-ink); background: var(--accent); border-radius: 8px; padding: 4px 12px;
+              text-decoration: none; font-weight: 600; font-size: 13.5px; }
   .loadbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px;
              border: 1px solid var(--warn); border-radius: 10px; padding: 8px 12px; margin: -4px 0 14px; }
   button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
@@ -114,25 +125,19 @@
   pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 10px;
         overflow-x: auto; font: 12.5px/1.4 var(--mono); margin: 8px 0 0; max-height: 320px; }
 </style>
+<link rel="stylesheet" href="/static/neat.css">
 </head>
 <body>
 <header>
-  <h1>Laya on Modalix</h1>
-  <p>Typed decisions in one forward pass on the MLA</p>
-  <nav><a class="here" href="/">Questions</a><a id="gamesLink" href="/games" hidden>Games</a><a href="/models">Models</a></nav>
+  <h1>Questions</h1>
+  <p>Your own questions and options, decided in one forward pass on the Modalix MLA</p>
+  <nav><a href="/">Debate</a><a class="here" href="/questions">Questions</a><a href="/games">Games</a><a href="/models">Models</a></nav>
   <div class="chips" id="chips"></div>
 </header>
+<script src="/static/brand.js"></script>
 <main>
   <section>
-    <div class="modelrow">
-      <label for="model">Model</label>
-      <select id="model" aria-describedby="modelNote"></select>
-    </div>
-    <p class="note" id="modelNote"></p>
-    <div class="loadbar" id="loadBar" hidden>
-      <span id="loadText"></span>
-      <button class="primary small" id="loadButton">Load model</button>
-    </div>
+    <div id="picker" class="pagepicker"></div>
     <h2>Examples</h2>
     <div class="row presets" id="presets"></div>
     <label class="small" for="state">State &mdash; the text or JSON to decide on</label>
@@ -143,14 +148,14 @@
         <span class="hint">Add your own:</span>
         <button class="small" data-add="choice" title="Pick one of several options">+ Choice</button>
         <button class="small" data-add="score" title="Rate on an ordered scale">+ Score</button>
-        <button class="small" data-add="noul" title="A yes / no question">+ Yes / no</button>
+        <button class="small" data-add="noul" title="A yes / no question">+ Yes / No</button>
       </span>
     </div>
     <div id="questions"></div>
     <div class="row actions">
       <span class="row">
-        <button id="save" title="Keep this state and its questions in this browser">Save scenario</button>
-        <button id="blank">Start blank</button>
+        <button id="save" title="Keep this state and its questions in this browser">Save Scenario</button>
+        <button id="blank">Start Blank</button>
       </span>
       <span class="row">
         <label class="switch"><input type="checkbox" id="live" checked> Decide as I type</label>
@@ -162,7 +167,7 @@
   <section>
     <div class="qhead" style="margin-top:0">
       <h2>Latency</h2>
-      <button class="small" id="clear" disabled>Clear results</button>
+      <button class="small" id="clear" disabled>Clear Results</button>
     </div>
     <div class="hero"><span class="value" id="perDecision">&ndash;</span>
       <span class="unit">ms on the MLA per decision</span></div>
@@ -176,18 +181,19 @@
   </section>
 </main>
 
+<script src="/static/model-picker.js"></script>
 <script>
 const BUDGET_MS = 30, BUDGET_SCALE_MS = 45;
 
 const PRESETS = [
-  { name: "Support triage",
+  { name: "Support Triage",
     state: "Hi, we were billed twice for March. Please refund the duplicate today or we will cancel our plan.",
     questions: [
       { id: "department", type: "choice", instructions: "Which department should handle this?",
         options: [["billing", "invoices, payments, refunds"], ["technical", "bugs, outages, system errors"], ["other", "everything else"]] },
       { id: "urgency", type: "score", instructions: "How urgent is this?", options: ["not urgent", "soon", "blocking"] },
       { id: "churn_risk", type: "noul", instructions: "Does the user threaten to cancel or leave?" } ] },
-  { name: "Agent tool routing",
+  { name: "Agent Tool Routing",
     state: "What will the weather be like in Tokyo tomorrow afternoon? I need to know whether to pack an umbrella.",
     questions: [
       { id: "tool", type: "choice", instructions: "Which tool should the agent call next?",
@@ -195,25 +201,25 @@ const PRESETS = [
                   ["web_search", "look up general facts on the web"], ["calculator", "arithmetic and unit conversion"],
                   ["none", "answer directly without a tool"]] },
       { id: "needs_clarification", type: "noul", instructions: "Is the request missing information the agent must ask for?" } ] },
-  { name: "Content moderation",
+  { name: "Content Moderation",
     state: "Great write-up, thanks for sharing the benchmark scripts. One nit: the second chart is missing its axis labels.",
     questions: [
       { id: "action", type: "choice", instructions: "What should happen to this comment?",
         options: [["allow", "on-topic and civil"], ["review", "borderline, needs a human look"], ["block", "abusive, spam or unsafe"]] },
       { id: "personal_attack", type: "noul", instructions: "Does the comment attack a person?" } ] },
-  { name: "Cell safety gate",
+  { name: "Cell Safety Gate",
     state: JSON.stringify({ zone: "A3", person_detected: true, distance_m: 0.6, arm_state: "moving", arm_speed: "high", light_curtain: "tripped" }, null, 1),
     questions: [
       { id: "command", type: "choice", instructions: "What should the robot cell do now?",
         options: [["continue", "nothing unusual, keep running"], ["slow", "reduce speed and keep monitoring"], ["stop", "halt motion immediately"]] },
       { id: "risk", type: "score", instructions: "How high is the risk of injury?", options: ["none", "low", "elevated", "severe"] } ] },
-  { name: "Soporte (espa\u00f1ol)",
+  { name: "Soporte (Espa\u00f1ol)",
     state: "Hola, me cobraron dos veces la suscripci\u00f3n de marzo. Necesito el reembolso hoy mismo o cancelar\u00e9 mi plan.",
     questions: [
       { id: "department", type: "choice", instructions: "Which department should handle this?",
         options: [["billing", "invoices, payments, refunds"], ["technical", "bugs, outages, system errors"], ["other", "everything else"]] },
       { id: "churn_risk", type: "noul", instructions: "Does the user threaten to cancel or leave?" } ] },
-  { name: "Email priority",
+  { name: "Email Priority",
     state: "Subject: Contract renewal - signature needed by Friday\n\nHi team, legal has approved the renewal terms. We need the countersigned copy back by Friday 5pm or the current pricing lapses. Let me know if anything blocks you.",
     questions: [
       { id: "priority", type: "choice", instructions: "How should this email be prioritized?",
@@ -230,7 +236,7 @@ const el = (tag, props = {}, ...children) => {
 let questions = [];
 // What the model selector offers: filled from /api/info. Each entry pins a model and, for the
 // general checkpoint, optionally one compiled graph.
-let MODELS = { auto: { request: {}, note: "" } };
+
 let timer = null, sequence = 0;
 
 function defaultOptions(type) {
@@ -276,7 +282,7 @@ function renderQuestions() {
           card.append(el("div", { className: "option single" }, el("span", { className: "idx", textContent: oi }), level, drop));
         }
       });
-      const more = el("button", { className: "ghost", textContent: q.type === "choice" ? "+ option" : "+ level" });
+      const more = el("button", { className: "ghost", textContent: q.type === "choice" ? "+ Option" : "+ Level" });
       more.style.marginTop = "6px";
       more.onclick = () => { q.options.push(q.type === "choice" ? ["", ""] : ""); renderQuestions(); };
       card.append(more);
@@ -306,7 +312,7 @@ function buildRequest() {
   const text = $("state").value;
   let state = text;
   if (/^\s*[\[{]/.test(text)) { try { state = JSON.parse(text); } catch (_) { state = text; } }
-  return { state, questions: out, ...(MODELS[$("model").value] || MODELS.auto).request };
+  return { state, questions: out, model: picker.name, max_len: picker.budget };
 }
 
 function changed() {
@@ -319,7 +325,7 @@ async function decide() {
   const request = buildRequest();
   const mine = ++sequence;
   if (!$("state").value.trim() || !Object.keys(request.questions).length) return;
-  if (!isLoaded()) return;   // the load bar under the selector says why
+  if (!picker.ready) return;   // the model strip says why
   const started = performance.now();
   // Switching to a model that is not on the MLA yet takes a few seconds to load.
   const slow = setTimeout(() => { $("error").hidden = false; $("error").className = "note";
@@ -338,9 +344,10 @@ async function decide() {
   $("raw").textContent = JSON.stringify({ request, response: body }, null, 2);
   $("error").hidden = !body.error;
   $("error").textContent = body.error || "";
-  if (body.not_loaded) refreshModels().catch(() => {});   // it was unloaded from the Models page
+  if (body.not_loaded) picker.lost();   // it was unloaded in the model manager
   if (body.error) return;
   $("clear").disabled = false;
+  picker.report(body.usage);
   renderLatency(body.usage, body.server_ms, roundTrip);
   renderAnswers(body.answers);
 }
@@ -357,7 +364,9 @@ function renderLatency(usage, serverMs, roundTrip) {
     stat(usage.latency_ms.toFixed(1) + " ms", "runtime total"),
     stat(usage.mla_ms.toFixed(1) + " ms", "MLA"),
     stat((usage.tokenize_ms + usage.pre_ms + usage.post_ms).toFixed(2) + " ms", "CPU pre + post"),
-    stat(usage.tokens + " / " + usage.seq_len, "tokens / graph"),
+    stat(usage.tokens + " / " + usage.max_len, "tokens used / budget"),
+    stat(usage.seq_len + " tokens", "graph it ran on"),
+    ...(usage.truncated ? [stat(usage.state_tokens_dropped, "tokens cut from the state")] : []),
     stat(roundTrip.toFixed(0) + " ms", "browser round trip"));
 }
 
@@ -480,87 +489,19 @@ $("save").onclick = () => {
   if (!storeScenarios(list)) return alert("This browser would not store the scenario.");
   renderPresets();
 };
-// Names and one-line descriptions for the checkpoints the board may have.
-const CHECKPOINTS = {
-  "laya": ["Laya", "English, ModernBERT-large."],
-  "laya-typed-decisions": ["Laya typed-decisions", "English, fine-tuned by upstream on typed-decision workflows."],
-  "laya-multilingual": ["Laya multilingual", "100+ languages, mmBERT-base (smaller and faster)."],
-  "laya-dino": ["Laya-dino", "Fine-tuned for Dino Arena: its head only knows run / jump / duck, so its answers to other questions are not meaningful."],
-};
-let modelInfo = {};
-
-function isLoaded() {
-  const chosen = MODELS[$("model").value];
-  return !chosen || !modelInfo[chosen.name] || modelInfo[chosen.name].loaded;
-}
-
-// Rebuilds the model selector from what the board reports, keeping the current choice.
-function showModels(all) {
-  modelInfo = all.models;
-  $("gamesLink").hidden = !all.models.dino;
-  const select = $("model"), previous = select.value;
-  MODELS = {};
-  select.replaceChildren();
-  for (const [name, info] of Object.entries(all.models)) {
-    const [title, about] = CHECKPOINTS[info.checkpoint] || [info.checkpoint || name, ""];
-    const sizes = info.loaded ? info.loaded_seq_lens : info.seq_lens;
-    const group = el("optgroup", { label: title + (info.loaded ? "" : " (not loaded)") });
-    const add = (key, label, request, note) => {
-      MODELS[key] = { request: { model: name, ...request }, note: about + " " + note, name, title };
-      group.append(el("option", { value: key, textContent: label }));
-    };
-    if (sizes.length > 1) {
-      add(name, `${title} \u00b7 auto`, {}, `Each question runs on the smallest of the ${sizes.join(" / ")}-token graphs it fits in.`);
-      for (const size of sizes) {
-        add(`${name}@${size}`, `${title} \u00b7 ${size}-token graph`, { seq_len: size },
-            `Every question runs on the ${size}-token graph; longer inputs are cut to fit.`);
-      }
-    } else {
-      add(name, `${title} \u00b7 ${sizes[0]} tokens`, {}, `Inputs longer than ${sizes[0]} tokens are cut to fit.`);
-    }
-    select.append(group);
-  }
-  MODELS.auto = MODELS.general;
-  select.value = previous in MODELS ? previous : (previous.split("@")[0] in MODELS ? previous.split("@")[0] : "general");
-  describeModel();
-}
-
-function describeModel() {
-  const chosen = MODELS[$("model").value], info = modelInfo[chosen.name];
-  $("modelNote").textContent = chosen.note;
-  $("loadBar").hidden = info.loaded;
-  $("loadText").textContent = `${chosen.title} is not on the MLA.`;
+// The page uses whichever model the model manager has loaded, and starts over when that changes.
+const picker = createModelPicker({ mount: $("picker"), onReady: (ready) => {
+  if (!ready) return clearResults("No model is on the MLA. Load one in the Models tab.");
+  const info = picker.models[picker.name];
   const chip = (text) => el("span", { className: "chip", textContent: text });
   $("chips").replaceChildren(
-    chip(`hidden ${info.hidden_size}`),
+    chip(`graphs: ${info.loaded_seq_lens.join(", ")} tokens`),
     chip("weights " + (info.precision === "BF16" ? "bf16" : info.precision)),
     chip("1 MLA ELF per graph, 0 CPU layers"));
-}
-
-async function refreshModels() {
-  showModels(await (await fetch("/api/info")).json());
-}
-
-$("model").onchange = () => { describeModel(); if (isLoaded()) decide(); else clearResults("Load the model to get decisions from it."); };
-$("loadButton").onclick = async () => {
-  const chosen = MODELS[$("model").value], button = $("loadButton");
-  button.disabled = true; button.textContent = "Loading\u2026";
-  let body;
-  try {
-    body = await (await fetch("/api/models/load", { method: "POST", headers: { "Content-Type": "application/json" },
-                                                    body: JSON.stringify({ model: chosen.name }) })).json();
-  } catch (error) {
-    body = { error: "The board did not answer: " + error.message };
-  }
-  button.disabled = false; button.textContent = "Load model";
-  if (body.error) { $("error").hidden = false; $("error").className = "error"; $("error").textContent = body.error; return; }
-  showModels(body);
   decide();
-};
-
-refreshModels().catch(() => {}).finally(startBlank);
-
-
+} });
+picker.onBudget = changed;
+startBlank();
 </script>
 </body>
 </html>

@@ -79,9 +79,11 @@ class Runtime {
   std::vector<uint32_t> seq_lens() const;
 
   std::vector<uint32_t> tokenize(const std::string& text) const;
-  // `limit` caps the sequence at one graph's length; 0 means the largest loaded graph.
+  // `limit` caps the whole sequence in tokens and `head_limit` the question and its options;
+  // 0 means the checkpoint's own budget, which is also never exceeded, nor is the largest
+  // loaded graph.
   Sequence build_sequence(const std::vector<uint32_t>& state_ids, const Question& question,
-                          bool truncate_left = false, uint32_t limit = 0) const;
+                          bool truncate_left = false, uint32_t limit = 0, uint32_t head_limit = 0) const;
 
   // Runs every loaded graph and the tokenizer once, so the first real request is not the one
   // that pays for cold caches.
@@ -99,7 +101,11 @@ class Runtime {
 
   // The upstream `Agent.system_one` call: {"answers": {...}, "usage": {...}}.
   // `seq_len` pins one compiled graph; 0 takes the smallest loaded graph the request fits in.
-  json predict(const json& state, const json& questions, uint32_t seq_len = 0);
+  // `max_len` is the token budget for a sequence (question, options and state together) and
+  // `head_max_len` the part of it the question and options may take; 0 means the checkpoint's.
+  // A state that does not fit is cut, and `usage` says by how much.
+  json predict(const json& state, const json& questions, uint32_t seq_len = 0, uint32_t max_len = 0,
+               uint32_t head_max_len = 0);
 
  private:
   struct Graph;

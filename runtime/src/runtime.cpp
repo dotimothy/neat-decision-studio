@@ -363,9 +363,15 @@ RawOutput Runtime::infer(const std::vector<uint32_t>& ids, const std::vector<uin
   return out;
 }
 
-json Runtime::predict(const json& state, const json& questions, uint32_t pinned) {
+json Runtime::predict(const json& state, const json& questions, uint32_t pinned, uint32_t max_len,
+                      uint32_t head_max_len) {
   if (pinned && !_graphs.contains(pinned))
     throw std::invalid_argument(fmt::format("no graph is loaded for seq_len {}", pinned));
+  if (max_len && max_len < 16) throw std::invalid_argument("the token budget must be at least 16");
+  // The budget in force: the request's, within the pinned graph, the largest loaded graph and
+  // what the checkpoint was trained for.
+  uint32_t budget = std::min(_cfg.max_len, pinned ? pinned : max_tokens());
+  if (max_len) budget = std::min(budget, max_len);
   if (state.is_null()) throw std::invalid_argument("state must not be null");
   if (!questions.is_object() || questions.empty())
     throw std::invalid_argument("questions must be a non-empty object of id -> question");
@@ -389,7 +395,7 @@ json Runtime::predict(const json& state, const json& questions, uint32_t pinned)
     Sequence seq;
     try {
       question = parse_question(qdef);
-      seq = build_sequence(state_ids, question, truncate_left, pinned);
+      seq = build_sequence(state_ids, question, truncate_left, budget, head_max_len);
     } catch (const std::invalid_argument& error) {
       throw std::invalid_argument(fmt::format("question \"{}\": {}", qid, error.what()));
     }
@@ -409,6 +415,7 @@ json Runtime::predict(const json& state, const json& questions, uint32_t pinned)
       {"answers", answers},
       {"usage",
        {{"tokens", max_tokens_used},
+        {"max_len", budget},
         {"seq_len", seq_len},
         {"state_tokens_dropped", dropped},
         {"truncated", dropped > 0},

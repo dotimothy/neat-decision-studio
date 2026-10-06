@@ -34,13 +34,16 @@ commands:
             --tokens N       sequence length in tokens (default: the largest loaded graph)
             --iters N        timed iterations after 3 warm-up runs (default: 50)
   serve   read {"state": ..., "questions": {...}} per stdin line, answer per stdout line
-          (an optional "seq_len" in the request pins the graph)
+          (optional "seq_len" pins the graph; "max_len" and "head_max_len" set the token budget)
   hidden  diagnostic: dump the encoder hidden state from an encoder-only ELF
             --elf FILE --seq-len N --input FILE --out FILE
 
 options:
   --seq-lens LIST    load only these compiled sequence lengths, e.g. 128,512
   --seq-len N        run/raw/bench: pin the graph instead of using the smallest that fits
+  --max-len N        run: token budget for question, options and state together; a longer
+                     state is cut (default: the checkpoint's, within the loaded graphs)
+  --head-max-len N   run: the part of the budget the question and its options may take
 )";
 
 struct Args {
@@ -100,7 +103,8 @@ int cmd_run(laya::Runtime& runtime, const Args& args) {
   json questions = json::parse(args.has("questions") ? read_file(args.get("questions")) : args.get("question"));
   if (questions.contains("type") && questions.at("type").is_string())
     questions = json{{"question", questions}};
-  std::cout << runtime.predict(state, questions, static_cast<uint32_t>(std::stoul(args.get("seq-len", "0")))).dump(2)
+  const auto number = [&](const char* key) { return static_cast<uint32_t>(std::stoul(args.get(key, "0"))); };
+  std::cout << runtime.predict(state, questions, number("seq-len"), number("max-len"), number("head-max-len")).dump(2)
             << std::endl;
   return 0;
 }
@@ -198,7 +202,8 @@ int cmd_serve(laya::Runtime& runtime) {
     json response;
     try {
       const json request = json::parse(line);
-      response = runtime.predict(request.at("state"), request.at("questions"), request.value("seq_len", 0u));
+      response = runtime.predict(request.at("state"), request.at("questions"), request.value("seq_len", 0u),
+                                 request.value("max_len", 0u), request.value("head_max_len", 0u));
       if (request.contains("id")) response["id"] = request.at("id");
     } catch (const std::exception& error) {
       response = {{"error", error.what()}};

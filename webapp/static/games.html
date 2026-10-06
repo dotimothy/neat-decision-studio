@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
 <title>Dino Arena &middot; Laya on Modalix</title>
 <style>
   :root {
@@ -70,14 +71,26 @@
   .slider-head b { font-variant-numeric: tabular-nums; }
   .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
   .error { color: var(--bad); margin-top: 10px; overflow-wrap: anywhere; }
+  .gamebar { display: flex; gap: 6px; align-items: center; padding: 0 24px 12px; color: var(--muted); font-size: 14px; }
+  .gamebar a { color: var(--muted); text-decoration: none; padding: 3px 12px; border-radius: 8px; border: 1px solid var(--line); }
+  .gamebar a.here { color: var(--ink); background: var(--chip); border-color: var(--accent); }
+  @media (max-width: 900px) { .gamebar { padding: 0 16px 10px; } }
+  .gamebar { flex-wrap: wrap; }
+  select { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 8px; }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
 </style>
+<link rel="stylesheet" href="/static/neat.css">
 </head>
 <body>
 <header>
   <h1>Dino Arena</h1>
   <p>Laya decides run, jump or duck on the Modalix MLA, about 45 times a second</p>
-  <nav><a href="/">Questions</a><a class="here" href="/games">Games</a><a href="/models">Models</a></nav>
+  <nav><a href="/">Debate</a><a href="/questions">Questions</a><a class="here" href="/games">Games</a><a href="/models">Models</a></nav>
 </header>
+<script src="/static/brand.js"></script>
+<div class="gamebar">Games <a class="here" href="/games">Dino Arena</a><a href="/games/blackjack">Blackjack</a><a href="/games/snake">Snake</a><a href="/games/sudoku">Sudoku</a>
+  <div id="picker"></div></div>
 <main>
   <section>
     <h2>Arena</h2>
@@ -85,8 +98,6 @@
     <div class="row controls">
       <span class="hint" id="hint"><kbd>Space</kbd> to race Laya &middot; <kbd>&uarr;</kbd> jump &middot; <kbd>&darr;</kbd> duck</span>
       <span class="row">
-        <button class="primary" id="load" hidden>Load game model</button>
-        <button id="unload" hidden>Unload model</button>
         <button id="pause">Pause</button>
         <button class="primary" id="race">Race Laya</button>
       </span>
@@ -107,7 +118,7 @@
       <div class="stat"><b id="rate">&ndash;</b><span>decisions per second</span></div>
       <div class="stat"><b id="trip">&ndash;</b><span>browser round trip</span></div>
       <div class="stat"><b id="count">0</b><span>decisions made</span></div>
-      <div class="stat"><b id="model">&ndash;</b><span>model on the MLA</span></div>
+      <div class="stat"><b id="model">&ndash;</b><span>model playing</span></div>
     </div>
 
     <div class="block">
@@ -128,6 +139,7 @@
   </section>
 </main>
 
+<script src="/static/model-picker.js"></script>
 <script>
 // ---------------------------------------------------------------------------------------------
 // Game harness. A game is an object with reset(seed), step(dt, action), observe() and
@@ -317,17 +329,18 @@ async function decideLoop() {
     try {
       const response = await fetch("/api/predict", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "dino", state: seen, questions: { action: QUESTION } }) });
+        body: JSON.stringify({ model: picker.name, max_len: picker.budget, state: seen, questions: { action: QUESTION } }) });
       body = await response.json();
     } catch (error) {
       body = { error: "The board did not answer: " + error.message };
     }
-    if (body.not_loaded) { setReady(false); break; }   // unloaded from the Models page
+    if (body.not_loaded) { ready = false; picker.lost(); break; }   // another model was loaded in its place
     $("error").hidden = !body.error;
     if (body.error) { $("error").textContent = body.error; await sleep(1000); continue; }
     const trip = performance.now() - sent;
     const extra = Number($("delay").value);
     if (extra) await sleep(extra);
+    picker.report(body.usage);
     const answer = body.answers.action;
     laya.action = answer.choice;
     decisions++;
@@ -338,34 +351,17 @@ async function decideLoop() {
   looping = false;
 }
 
-// The arena only runs while the game model is loaded. Loading is a deliberate click.
+// The arena only runs while the chosen model is on the MLA. Loading is a deliberate click.
 function setReady(value) {
   ready = value;
-  $("load").hidden = value;
-  $("unload").hidden = !value;
   $("race").disabled = $("pause").disabled = !value;
+  $("model").textContent = picker.name;
   if (value) {
     laya.world.reset(seed); laya.action = "run"; you.world = null;
+    recent.length = 0;
     lastFrame = performance.now(); carry = 0;
     decideLoop();
   }
-}
-
-async function manage(action) {
-  const button = $(action);
-  const label = button.textContent;
-  button.disabled = true; button.textContent = action === "load" ? "Loading\u2026" : "Unloading\u2026";
-  let body;
-  try {
-    body = await (await fetch("/api/models/" + action, { method: "POST", headers: { "Content-Type": "application/json" },
-                                                         body: JSON.stringify({ model: "dino" }) })).json();
-  } catch (error) {
-    body = { error: "The board did not answer: " + error.message };
-  }
-  button.disabled = false; button.textContent = label;
-  $("error").hidden = !body.error;
-  if (body.error) { $("error").textContent = body.error; return; }
-  setReady(body.models.dino.loaded);
 }
 
 function showDecision(seen, answer) {
@@ -451,9 +447,9 @@ function draw() {
     ctx.fillStyle = color.sky; ctx.globalAlpha = 0.82; ctx.fillRect(0, 0, width, height); ctx.globalAlpha = 1;
     ctx.fillStyle = color.ink; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.font = `600 ${Math.round(cell * 0.7)}px system-ui, sans-serif`;
-    ctx.fillText("The game model is not loaded", width / 2, height / 2 - cell * 0.5);
+    ctx.fillText("No model is on the MLA", width / 2, height / 2 - cell * 0.5);
     ctx.fillStyle = color.muted; ctx.font = `${Math.round(cell * 0.52)}px system-ui, sans-serif`;
-    ctx.fillText("Press \u201cLoad game model\u201d to put it on the MLA and start", width / 2, height / 2 + cell * 0.5);
+    ctx.fillText("Load one in the Models tab; the game starts by itself", width / 2, height / 2 + cell * 0.5);
     return;
   }
   if (you.world) {
@@ -508,19 +504,7 @@ $("race").onclick = startRace;
 $("pause").onclick = () => { paused = !paused; $("pause").textContent = paused ? "Resume" : "Pause"; };
 $("delay").oninput = () => { $("delayValue").textContent = $("delay").value + " ms"; };
 
-$("load").onclick = () => manage("load");
-$("unload").onclick = () => manage("unload");
-fetch("/api/info").then((r) => r.json()).then((info) => {
-  const dino = info.models.dino;
-  if (!dino) {
-    $("error").hidden = false;
-    $("error").textContent = "No game model is deployed. Deploy one with bin/laya-deploy --game and restart run.sh.";
-    $("race").disabled = $("pause").disabled = true;
-    return;
-  }
-  $("model").textContent = (dino.precision === "BF16" ? "bf16" : "int8") + " \u00b7 " + dino.seq_lens[0] + " tok";
-  setReady(dino.loaded);
-}).catch(() => {});
+const picker = createModelPicker({ mount: $("picker"), madeFor: "dino", onReady: setReady });
 resize();
 requestAnimationFrame(frame);
 </script>

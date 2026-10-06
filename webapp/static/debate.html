@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
+<title>Debate &middot; Laya on Modalix</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f4b; --warn: #b45309; --bad: #c0362c;
+    --track: #e8ebf1; --chip: #eef2f8; --field: #ffffff; --sky: #f9fafc; --you: #b45309;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebf0; --muted: #98a2b3; --line: #2a303a;
+      --accent: #5b9dff; --accent-ink: #0b1220; --good: #4cc38a; --warn: #f0a84b; --bad: #f47067;
+      --track: #232934; --chip: #1f252e; --field: #11151a; --sky: #12161b; --you: #f0a84b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 18px 24px 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid transparent; font-size: 14px; }
+  nav a:hover { border-color: var(--line); }
+  nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
+  main { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 16px;
+         padding: 0 24px 32px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 0 16px 24px; }
+                              header { padding: 16px 16px 10px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .controls { margin-top: 12px; justify-content: space-between; }
+  .hint { color: var(--muted); font-size: 13.5px; }
+  kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+        padding: 1px 6px; background: var(--chip); color: var(--ink); }
+  button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--chip); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-variant-numeric: tabular-nums; font-size: 16px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero .value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .hero .unit { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+        font: 12.5px/1.4 var(--mono); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bar { display: grid; grid-template-columns: 48px minmax(0, 1fr) 52px; gap: 8px; align-items: center;
+         margin-top: 6px; font-size: 13.5px; }
+  .bar .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .bar.top .track i { opacity: 1; }
+  .bar.top .name { font-weight: 650; }
+  .bar .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .block { margin-top: 16px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px; }
+  .slider-head { display: flex; justify-content: space-between; font-size: 13.5px; }
+  .slider-head b { font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .error { color: var(--bad); margin-top: 10px; overflow-wrap: anywhere; }
+  .gamebar { display: flex; gap: 6px; align-items: center; padding: 0 24px 12px; color: var(--muted); font-size: 14px; }
+  .gamebar a { color: var(--muted); text-decoration: none; padding: 3px 12px; border-radius: 8px; border: 1px solid var(--line); }
+  .gamebar a.here { color: var(--ink); background: var(--chip); border-color: var(--accent); }
+  @media (max-width: 900px) { .gamebar { padding: 0 16px 10px; } }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+  select { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 8px; }
+  .felt { background: var(--sky); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-height: 290px; }
+  .seat { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 4px 12px; align-items: center; margin-bottom: 14px; }
+  .seat .who { font-weight: 650; }
+  .seat .total { color: var(--muted); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  .cards { display: flex; flex-wrap: wrap; gap: 8px; min-height: 76px; }
+  .card { width: 52px; height: 74px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel);
+          display: flex; flex-direction: column; justify-content: space-between; padding: 5px 7px;
+          font-weight: 650; font-size: 17px; line-height: 1; }
+  .card .suit { align-self: flex-end; font-size: 19px; }
+  .card.red { color: var(--bad); }
+  .card.back { background: repeating-linear-gradient(45deg, var(--chip), var(--chip) 5px, var(--track) 5px, var(--track) 10px); }
+  .outcome { min-height: 26px; font-weight: 650; }
+  .outcome.win { color: var(--good); } .outcome.loss { color: var(--bad); } .outcome.push { color: var(--muted); }
+  .bar { grid-template-columns: minmax(96px, 34%) minmax(0, 1fr) 52px; }
+  .bar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .name small { color: var(--muted); font-weight: 400; }
+  table.chart { border-collapse: separate; border-spacing: 2px; font: 12px var(--mono); margin-top: 6px; }
+  table.chart th { color: var(--muted); font-weight: 400; padding: 0 3px; text-align: center; }
+  table.chart td { width: 22px; height: 19px; text-align: center; border-radius: 3px; background: var(--track); }
+  table.chart td.hit { background: var(--accent); color: var(--accent-ink); }
+  table.chart td.stand { background: var(--chip); color: var(--ink); }
+  table.chart td.differs { outline: 2px solid var(--warn); outline-offset: -1px; }
+  .charts { display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: flex-start; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+  .gamebar { flex-wrap: wrap; }
+  .bet { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0 9px; font-size: 13px;
+         font-variant-numeric: tabular-nums; margin-top: 3px; background: var(--panel); }
+  .group { display: grid; grid-template-columns: 96px minmax(0, 1fr) 56px; gap: 8px; align-items: center; font-size: 13.5px; margin-top: 5px; }
+  .group .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .group .track i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+  .group .n { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .memline { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; align-items: center; }
+  .memline b { font-variant-numeric: tabular-nums; }
+  button.small { padding: 3px 10px; font-size: 13.5px; }
+  .asked { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+  canvas { display: block; width: 100%; border-radius: 8px; background: var(--sky); border: 1px solid var(--line); }
+  .option { display: grid; grid-template-columns: 70px minmax(0, 1fr) 52px; gap: 8px; align-items: center; margin-top: 7px; font-size: 13.5px; }
+  .option .what { color: var(--muted); }
+  .option .move { font-weight: 400; }
+  .option.top .move { font-weight: 650; }
+  .option .track { grid-column: 2; height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .option .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .option.top .track i { opacity: 1; }
+  .option .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .option.fatal .what { color: var(--bad); }
+  textarea, input[type=text] { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+                               border-radius: 8px; padding: 8px 10px; width: 100%; min-width: 0; }
+  textarea { min-height: 110px; resize: vertical; font-size: 17px; }
+  textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  label.small { font-size: 12.5px; color: var(--muted); display: block; margin: 12px 0 4px; }
+  .examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .examples button { font-size: 13.5px; padding: 3px 10px; }
+  .answerhead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 16px; }
+  .answerhead .hero .value { font-size: 30px; }
+  .budget { position: relative; height: 8px; background: var(--track); border-radius: 999px; margin: 8px 0 4px; }
+  .budget .fill { height: 100%; border-radius: 999px; background: var(--good); width: 0; transition: width .15s; }
+  .budget .fill.over { background: var(--bad); }
+  .budget .mark { position: absolute; top: -4px; bottom: -4px; left: 66.67%; width: 2px; background: var(--ink); opacity: .55; }
+  .verdict { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+  .verdict small { font-size: 15px; font-weight: 400; color: var(--muted); margin-left: 8px; }
+  .pie { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr); gap: 18px; align-items: center; margin-top: 10px; }
+  @media (max-width: 520px) { .pie { grid-template-columns: minmax(0, 1fr); } }
+  .pie svg { width: 100%; height: auto; display: block; }
+  .pie .slice-yes { fill: var(--accent); } .pie .slice-no { fill: var(--warn); }
+  .pie .empty { fill: var(--track); }
+  .pie text { font: 600 15px system-ui, sans-serif; fill: #fff; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+  .key { display: grid; gap: 10px; }
+  .key div { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .key i { width: 14px; height: 14px; border-radius: 3px; }
+  .key b { font-size: 22px; font-variant-numeric: tabular-nums; }
+  .trace { width: 100%; height: 70px; display: block; margin-top: 6px; }
+  .trace .mid { stroke: var(--line); stroke-dasharray: 3 4; }
+  .trace .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+  .trace text { font: 11px system-ui, sans-serif; fill: var(--muted); }
+  /* One column: the question, then the answer, each element under the last. */
+  header, .gamebar, main, .pagehead, .hero-strip { max-width: 1180px; margin-left: auto; margin-right: auto; width: 100%; }
+  /* The answer on top, the question at the bottom, where it stays in reach while scrolling. */
+  /* It only sticks where there is room for the chart, the figures and the verdict above it. */
+  @media (min-height: 800px) { .ask { position: sticky; bottom: 12px; box-shadow: 0 6px 28px rgba(0, 0, 0, .18); } }
+  .ask { padding: 12px 16px; }
+  .ask textarea { min-height: 52px; height: 52px; }
+  .askhead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; margin-bottom: 8px; }
+  .askhead h2 { margin: 0; }
+  .askrow { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .askrow .examples { flex: 1; min-width: 0; margin: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
+  .askrow .examples button { white-space: nowrap; flex: none; }
+  main { grid-template-columns: minmax(0, 1fr); }
+  .gamebar .picker { margin-left: 0; }
+  /* The verdict, then every metric side by side in one row. */
+  .verdict { text-align: center; }
+  .metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+  @media (max-width: 760px) { .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .metrics .stat { display: block; text-align: center; }
+  .metrics .stat b { font-size: 22px; }
+  .metrics .stat span { font-size: 12px; }
+  .pie { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 10px; margin-top: 0; }
+  .verdict { font-size: 26px; }
+  .pie svg { max-width: 210px; }
+  .key { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 36px; }
+  .key div { grid-template-columns: 14px auto auto; }
+  .stats { grid-template-columns: minmax(0, 1fr); }
+  .stat { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .stat b { order: 2; }
+  .stat span { font-size: 13.5px; }
+</style>
+<link rel="stylesheet" href="/static/neat.css">
+</head>
+<body data-landing>
+<header>
+  <h1>Debate</h1>
+  <p>Ask a yes-or-no question and Laya answers it, as you type</p>
+  <nav><a class="here" href="/">Debate</a><a href="/questions">Questions</a><a href="/games">Games</a><a href="/models">Models</a></nav>
+</header>
+<script src="/static/brand.js"></script>
+<div class="gamebar"><div id="picker"></div></div>
+<main>
+  <section>
+    <h2>Laya's answer</h2>
+    <div class="pie">
+      <svg viewBox="0 0 200 200" role="img" id="pie" aria-label="No answer yet">
+        <circle class="empty" cx="100" cy="100" r="96"></circle>
+        <path class="slice-yes" id="sliceYes"></path>
+        <path class="slice-no" id="sliceNo"></path>
+        <text id="labelYes"></text>
+        <text id="labelNo"></text>
+      </svg>
+      <div class="key">
+        <div><i style="background:var(--accent)"></i><span>Yes</span><b id="pctYes">&ndash;</b></div>
+        <div><i style="background:var(--warn)"></i><span>No</span><b id="pctNo">&ndash;</b></div>
+      </div>
+    </div>
+    <p class="verdict" id="verdict">&ndash;</p>
+    <div class="metrics">
+      <div class="stat"><b id="tokens">&ndash;</b><span id="tokensUnit">tokens to decide</span></div>
+      <div class="stat"><b id="mlaMs">&ndash;</b><span>ms on the MLA</span></div>
+      <div class="stat"><b id="total">&ndash;</b><span>runtime, with tokenizing</span></div>
+      <div class="stat"><b id="trip">&ndash;</b><span>browser round trip</span></div>
+      <div class="stat"><b id="rate">&ndash;</b><span>answers per second while typing</span></div>
+      <div class="stat"><b id="count">0</b><span>decisions made</span></div>
+    </div>
+    <div class="budget" title="Time on the MLA for the last answer, against a 30 ms budget"><div class="fill" id="budgetFill"></div><div class="mark"></div></div>
+    <div class="legend" style="justify-content:space-between"><span>0 ms</span><span>30 ms budget</span><span>45 ms</span></div>
+    <div class="block">
+      <h2>As you typed</h2>
+      <svg class="trace" id="trace" viewBox="0 0 300 70" preserveAspectRatio="none" role="img" aria-label="Probability of yes over time">
+        <line class="mid" x1="0" y1="35" x2="300" y2="35"></line>
+        <polyline class="line" id="traceLine" points=""></polyline>
+      </svg>
+      <div class="legend" style="justify-content:space-between"><span>yes at the top, no at the bottom</span><span id="traceNote"></span></div>
+    </div>
+    <p class="note">The model answers by itself, with exactly two options, yes and no. It has nothing to look things up in:
+      what it knows is what its encoder absorbed in pre-training. On 24 simple factual questions the English general model
+      got 21 right; on matters of opinion the answer follows the wording.</p>
+  </section>
+
+  <section class="ask">
+    <div class="askhead"><h2>Your question</h2><span class="hint" id="hint">The only answers Laya can give are yes and no.</span></div>
+    <textarea id="question" spellcheck="false" aria-label="A yes-or-no question" placeholder="Ask something with a yes or no answer&hellip;"></textarea>
+    <div class="askrow">
+      <div class="examples" id="examples"></div>
+      <button id="clear">Clear</button>
+    </div>
+    <div class="error" id="error" hidden></div>
+  </section>
+</main>
+
+<script src="/static/model-picker.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const EXAMPLES = ["Is the sky blue?", "Is the Earth flat?", "Do fish live in water?", "Is Berlin the capital of Spain?",
+                  "Should cities ban cars from their centres?", "Is a hot dog a sandwich?"];
+// The typed text is the state, labelled as a question, and the model is asked for its answer
+// with the two options below. Of eight ways of putting it, this one answered best.
+const OPTIONS = ["yes", "no"];
+const ASK = { type: "choice", instructions: "Is the answer yes or no?", criteria: OPTIONS };
+const asState = (text) => "Question: " + text;
+
+let sequence = 0, shown = null, target = null, decisions = 0;
+const trace = [], stamps = [];
+
+function slice(from, to) {
+  // An arc of the pie between two fractions of the circle, clockwise from the top.
+  if (to - from >= 0.9999) return "M100,4 A96,96 0 1 1 99.99,4 Z";
+  const point = (f) => [100 + 96 * Math.sin(2 * Math.PI * f), 100 - 96 * Math.cos(2 * Math.PI * f)];
+  const [x1, y1] = point(from), [x2, y2] = point(to);
+  return `M100,100 L${x1.toFixed(2)},${y1.toFixed(2)} A96,96 0 ${to - from > 0.5 ? 1 : 0} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z`;
+}
+
+function drawPie(yes) {
+  const label = (node, from, to, name, p) => {
+    const middle = (from + to) / 2, r = 56;
+    node.setAttribute("x", 100 + r * Math.sin(2 * Math.PI * middle));
+    node.setAttribute("y", 100 - r * Math.cos(2 * Math.PI * middle));
+    node.textContent = p >= 0.12 ? `${name} ${Math.round(p * 100)}%` : "";   // too thin a slice to hold a label
+  };
+  $("sliceYes").setAttribute("d", yes > 0.0001 ? slice(0, yes) : "");
+  $("sliceNo").setAttribute("d", yes < 0.9999 ? slice(yes, 1) : "");
+  label($("labelYes"), 0, yes, "Yes", yes);
+  label($("labelNo"), yes, 1, "No", 1 - yes);
+}
+
+// Ease the pie toward the newest answer so it reads as one moving chart.
+function animate() {
+  if (target === null) return;
+  shown = shown === null ? target : shown + (target - shown) * 0.25;
+  if (Math.abs(target - shown) < 0.002) shown = target;
+  drawPie(shown);
+  if (shown !== target) requestAnimationFrame(animate);
+}
+
+function showAnswer(yes, usage, trip) {
+  target = yes;
+  requestAnimationFrame(animate);
+  const pct = (p) => (p * 100).toFixed(1) + "%";
+  $("pctYes").textContent = pct(yes); $("pctNo").textContent = pct(1 - yes);
+  $("pie").setAttribute("aria-label", `Yes ${pct(yes)}, no ${pct(1 - yes)}`);
+  const lean = Math.abs(yes - 0.5);
+  $("verdict").replaceChildren(yes >= 0.5 ? "Yes" : "No",
+    Object.assign(document.createElement("small"), { textContent: lean < 0.1 ? "barely" : lean < 0.3 ? "leaning" : "clearly" }));
+  trace.push(yes);
+  while (trace.length > 80) trace.shift();
+  const step = 300 / Math.max(1, trace.length - 1);
+  $("traceLine").setAttribute("points", trace.map((p, i) => `${(i * step).toFixed(1)},${(66 - p * 62).toFixed(1)}`).join(" "));
+  $("traceNote").textContent = `${trace.length} decision${trace.length === 1 ? "" : "s"}`;
+  $("mlaMs").textContent = usage.mla_ms.toFixed(1);
+  const fill = $("budgetFill");
+  fill.style.width = Math.min(100, usage.mla_ms / 45 * 100) + "%";
+  fill.classList.toggle("over", usage.mla_ms > 30);
+  $("total").textContent = usage.latency_ms.toFixed(1) + " ms";
+  $("trip").textContent = trip.toFixed(0) + " ms";
+  const now = performance.now();
+  stamps.push(now);
+  while (stamps.length && now - stamps[0] > 1000) stamps.shift();
+  $("rate").textContent = stamps.length;
+  $("count").textContent = (++decisions).toLocaleString();
+  // Everything the model read: the instruction, the two options and the question as typed.
+  $("tokens").textContent = usage.tokens;
+  $("tokensUnit").textContent = `token${usage.tokens === 1 ? "" : "s"} to decide`
+    + (usage.truncated ? `, ${usage.state_tokens_dropped} cut by the budget of ${usage.max_len}` : ` (budget ${usage.max_len})`);
+}
+
+function reset() {
+  sequence++;
+  target = shown = null; trace.length = 0;
+  $("sliceYes").setAttribute("d", ""); $("sliceNo").setAttribute("d", "");
+  $("labelYes").textContent = $("labelNo").textContent = "";
+  $("pie").setAttribute("aria-label", "No answer yet");
+  $("pctYes").textContent = $("pctNo").textContent = "\u2013";
+  $("verdict").textContent = "\u2013";
+  $("mlaMs").textContent = "\u2013"; $("budgetFill").style.width = "0";
+  $("tokens").textContent = "\u2013"; $("tokensUnit").textContent = "tokens to decide";
+  $("traceLine").setAttribute("points", ""); $("traceNote").textContent = "";
+}
+
+async function decide() {
+  const text = $("question").value.trim();
+  if (!picker.ready) { $("hint").textContent = "No model is on the MLA. Load one in the Models tab."; return; }
+  if (!text) { $("hint").textContent = "Type a yes-or-no question."; return; }
+  const mine = ++sequence, sent = performance.now();
+  let body;
+  try {
+    body = await (await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: picker.name, max_len: picker.budget, state: asState(text), questions: { answer: ASK } }) })).json();
+  } catch (error) {
+    body = { error: "The board did not answer: " + error.message };
+  }
+  if (mine !== sequence) return;            // superseded by newer typing
+  if (body.not_loaded) { picker.lost(); return; }
+  $("error").hidden = !body.error;
+  if (body.error) { $("error").textContent = body.error; return; }
+  picker.report(body.usage);
+  $("hint").textContent = "The only answers Laya can give are yes and no.";
+  showAnswer(body.answers.answer.probabilities.yes, body.usage, performance.now() - sent);
+}
+
+// Live feedback: one request at a time, and as soon as it returns, another if the text has
+// moved on. While someone types that is a decision every 25 to 40 ms, with no wait for a pause.
+let pending = false, running = false;
+async function changed() {
+  pending = true;
+  if (running) return;
+  running = true;
+  while (pending) { pending = false; await decide(); }
+  running = false;
+}
+
+for (const example of EXAMPLES) {
+  const button = Object.assign(document.createElement("button"), { textContent: example });
+  button.onclick = () => { $("question").value = example; reset(); changed(); $("question").focus(); };
+  $("examples").append(button);
+}
+$("question").oninput = changed;
+$("clear").onclick = () => { $("question").value = ""; reset(); $("hint").textContent = "Type a yes-or-no question."; $("question").focus(); };
+
+const picker = createModelPicker({ mount: $("picker"), onReady: (ready) => {
+  if (ready) { reset(); changed(); } else $("hint").textContent = "No model is on the MLA. Load one in the Models tab.";
+} });
+picker.onBudget = changed;
+</script>
+</body>
+</html>
