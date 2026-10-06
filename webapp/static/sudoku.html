@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
+<title>Sudoku &middot; Laya on Modalix</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f4b; --warn: #b45309; --bad: #c0362c;
+    --track: #e8ebf1; --chip: #eef2f8; --field: #ffffff; --sky: #f9fafc; --you: #b45309;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebf0; --muted: #98a2b3; --line: #2a303a;
+      --accent: #5b9dff; --accent-ink: #0b1220; --good: #4cc38a; --warn: #f0a84b; --bad: #f47067;
+      --track: #232934; --chip: #1f252e; --field: #11151a; --sky: #12161b; --you: #f0a84b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 18px 24px 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid transparent; font-size: 14px; }
+  nav a:hover { border-color: var(--line); }
+  nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
+  main { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 16px;
+         padding: 0 24px 32px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 0 16px 24px; }
+                              header { padding: 16px 16px 10px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .controls { margin-top: 12px; justify-content: space-between; }
+  .hint { color: var(--muted); font-size: 13.5px; }
+  kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+        padding: 1px 6px; background: var(--chip); color: var(--ink); }
+  button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--chip); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-variant-numeric: tabular-nums; font-size: 16px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero .value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .hero .unit { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+        font: 12.5px/1.4 var(--mono); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bar { display: grid; grid-template-columns: 48px minmax(0, 1fr) 52px; gap: 8px; align-items: center;
+         margin-top: 6px; font-size: 13.5px; }
+  .bar .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .bar.top .track i { opacity: 1; }
+  .bar.top .name { font-weight: 650; }
+  .bar .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .block { margin-top: 16px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px; }
+  .slider-head { display: flex; justify-content: space-between; font-size: 13.5px; }
+  .slider-head b { font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .error { color: var(--bad); margin-top: 10px; overflow-wrap: anywhere; }
+  .gamebar { display: flex; gap: 6px; align-items: center; padding: 0 24px 12px; color: var(--muted); font-size: 14px; }
+  .gamebar a { color: var(--muted); text-decoration: none; padding: 3px 12px; border-radius: 8px; border: 1px solid var(--line); }
+  .gamebar a.here { color: var(--ink); background: var(--chip); border-color: var(--accent); }
+  @media (max-width: 900px) { .gamebar { padding: 0 16px 10px; } }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+  select { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 8px; }
+  .option { display: grid; grid-template-columns: 54px minmax(0, 1fr) 52px; gap: 2px 8px; align-items: center; margin-top: 6px; font-size: 13.5px; }
+  .option .what { color: var(--muted); }
+  .option.top .name { font-weight: 650; }
+  .option .track { grid-column: 2; height: 6px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .option .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .option.top .track i { opacity: 1; }
+  .option .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .option.breaks .what { color: var(--bad); }
+  .option.risk .what { color: var(--warn); }
+  .boardhead { justify-content: space-between; margin-bottom: 10px; }
+  .boardhead h2 { margin: 0; }
+  .boardhead label { color: var(--muted); font-size: 13.5px; }
+  #boardwrap { display: flex; justify-content: center; }
+  .sudoku { display: grid; grid-template-columns: repeat(9, 1fr); width: min(100%, 560px, 68vh); aspect-ratio: 1;
+            border: 2px solid var(--ink); border-radius: 8px; overflow: hidden; background: var(--sky); }
+  .sudoku div { display: flex; align-items: center; justify-content: center; position: relative;
+                border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+                font-size: clamp(15px, 3.4vh, 26px); font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; }
+  .sudoku div:nth-child(9n) { border-right: 0; }
+  .sudoku div:nth-child(n + 73) { border-bottom: 0; }
+  .sudoku div:nth-child(3n):not(:nth-child(9n)) { border-right: 2px solid var(--ink); }
+  .sudoku div:nth-child(n + 19):nth-child(-n + 27), .sudoku div:nth-child(n + 46):nth-child(-n + 54) { border-bottom: 2px solid var(--ink); }
+  .sudoku div.given { color: var(--ink); font-weight: 700; background: var(--chip); }
+  .sudoku div.offered { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .sudoku div.chosen { box-shadow: inset 0 0 0 3px var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .sudoku div.mistake { color: var(--bad); }
+  .sudoku div.mistake small { position: absolute; top: 2px; right: 4px; font-size: 0.5em; font-weight: 500; text-decoration: line-through; opacity: .8; }
+  .sudoku div.fresh { animation: pop .35s ease-out; }
+  @keyframes pop { from { transform: scale(1.5); } to { transform: scale(1); } }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+  .legend b { font-weight: 700; }
+  .asked { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+</style>
+<link rel="stylesheet" href="/static/neat.css">
+</head>
+<body>
+<header>
+  <h1>Sudoku</h1>
+  <p id="tagline">Laya fills the grid on the Modalix MLA, two decisions a cell: which cell, then which digit</p>
+  <nav><a href="/">Debate</a><a href="/questions">Questions</a><a class="here" href="/games">Games</a><a href="/models">Models</a></nav>
+</header>
+<script src="/static/brand.js"></script>
+<div class="gamebar">Games <a href="/games">Dino Arena</a><a href="/games/blackjack">Blackjack</a><a href="/games/snake">Snake</a><a class="here" href="/games/sudoku">Sudoku</a>
+  <div id="picker"></div></div>
+<main>
+  <section>
+    <div class="row boardhead">
+      <h2>Puzzle</h2>
+      <span class="row">
+        <label for="level">Level</label>
+        <select id="level" aria-label="Level">
+          <option value="easy">Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </span>
+    </div>
+    <div id="boardwrap"><div class="sudoku" id="board" role="img" aria-label="Sudoku grid"></div></div>
+    <div class="legend"><span><b>Bold</b> digits came with the puzzle</span><span style="color:var(--accent)">Laya's digits</span>
+      <span style="color:var(--bad)">a mistake, corrected (what it wrote is struck through)</span></div>
+    <div class="row controls">
+      <span class="hint" id="hint">Two decisions per cell</span>
+      <span class="row">
+        <select id="speed" aria-label="Speed">
+          <option value="watch">Watch Speed</option>
+          <option value="fast">As Fast As It Decides</option>
+        </select>
+        <button id="restart">New Puzzle</button>
+        <button id="auto">Pause</button>
+      </span>
+    </div>
+    <div class="scores">
+      <div class="stat"><b id="filled">0</b><span>cells filled in this puzzle</span></div>
+      <div class="stat"><b id="mistakes">0</b><span>mistakes in this puzzle</span></div>
+      <div class="stat"><b id="puzzles">0</b><span>puzzles finished</span></div>
+      <div class="stat"><b id="average">&ndash;</b><span>mistakes per puzzle</span></div>
+    </div>
+    <div class="row controls"><span class="hint">Scores are kept until reset, and start over when the level changes.</span><button class="small" id="resetScores">Reset Scores</button></div>
+    <p class="note" id="levelNote"></p>
+    <div class="error" id="error" hidden></div>
+  </section>
+
+  <section>
+    <h2>Laya's decisions</h2>
+    <div class="hero"><span class="value" id="mlaMs">&ndash;</span><span class="unit">ms on the MLA per decision</span></div>
+    <div class="stats">
+      <div class="stat"><b id="rate">&ndash;</b><span>decisions per second</span></div>
+      <div class="stat"><b id="count">0</b><span>decisions made</span></div>
+      <div class="stat"><b id="matched">&ndash;</b><span>picked a best-described option</span></div>
+      <div class="stat"><b id="trip">&ndash;</b><span>browser round trip</span></div>
+    </div>
+    <div class="block">
+      <h2>Which cell it picks</h2>
+      <p class="asked" id="cellAsked"></p>
+      <div id="cellOptions"></div>
+    </div>
+    <div class="block">
+      <h2>Which digit it writes</h2>
+      <p class="asked" id="digitAsked"></p>
+      <div id="digitOptions"></div>
+    </div>
+    <p class="note">The model is not shown the grid. The harness looks at each cell's row, column and box and says what it found
+      in a few words; those descriptions are the options of the two questions, and choosing among them is the model's part.</p>
+  </section>
+</main>
+
+<script src="/static/sudoku-core.js"></script>
+<script src="/static/model-picker.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const LEVEL_NOTES = {
+  easy: "Easy: every cell can be filled by ruling digits out, so a certain cell is always on offer.",
+  medium: "Medium: some cells are certain only because their digit has no other place left in its row, column or box. A certain cell is still always on offer.",
+  hard: "Hard: the certain cells run out, and then Laya has to take a risk. A wrong digit is counted and replaced by the right one, so the puzzle still gets finished.",
+};
+function savedLevel() {
+  try { const level = localStorage.getItem("laya.sudoku.level"); if (SUDOKU_LEVELS.includes(level)) return level; } catch (_) { /* none saved */ }
+  return "easy";
+}
+
+let seed = Date.now() & 0xfffff;
+const game = new SudokuGame(seed, savedLevel());
+let auto = true, looping = false, round = 0;
+let offered = [], chosen = -1, fresh = -1;
+const start = () => ({ puzzles: 0, mistakes: 0, decisions: 0, matched: 0 });
+let stats = start();
+const recent = [];
+
+class NotLoaded extends Error {}
+
+// One decision: a question whose options are described, and the option the model takes.
+async function decide(state, asked, show) {
+  const sent = performance.now();
+  const response = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: picker.name, max_len: picker.budget, state, questions: { q: asked.question } }) });
+  const body = await response.json();
+  if (body.not_loaded) throw new NotLoaded(body.error);
+  if (body.error) throw new Error(body.error);
+  picker.report(body.usage);
+  const answer = body.answers.q;
+  recent.push({ at: performance.now(), mla: body.usage.mla_ms, trip: performance.now() - sent });
+  while (recent.length > 60) recent.shift();
+  stats.decisions++;
+  if (asked.outcomes[answer.choice] === Math.min(...Object.values(asked.outcomes))) stats.matched++;
+  show(asked, answer);
+  return answer.choice;
+}
+
+function showOptions(root, asked, answer, words, kind) {
+  root.replaceChildren(...Object.keys(asked.outcomes).map((name) => {
+    const row = document.createElement("div"), level = asked.outcomes[name], p = answer ? answer.probabilities[name] : 0;
+    row.className = "option" + (answer && name === answer.choice ? " top" : "") + " " + kind(level);
+    row.innerHTML = '<span class="name"></span><span class="what"></span><span class="pct"></span><span class="track"><i></i></span>';
+    row.querySelector(".name").textContent = name;
+    row.querySelector(".what").textContent = words[level];
+    row.querySelector("i").style.width = (p * 100).toFixed(1) + "%";
+    row.querySelector(".pct").textContent = answer ? (p * 100).toFixed(1) + "%" : "";
+    return row;
+  }));
+}
+const showCell = (asked, answer) => {
+  $("cellAsked").textContent = `${SUDOKU_CELL_STATE} ${SUDOKU_CELL_INSTRUCTIONS}`;
+  showOptions($("cellOptions"), asked, answer, SUDOKU_CELL_OUTCOMES, (level) => level ? "risk" : "");
+};
+const showDigit = (asked, answer) => {
+  $("digitAsked").textContent = `${SUDOKU_DIGIT_STATE} ${SUDOKU_DIGIT_INSTRUCTIONS}`;
+  showOptions($("digitOptions"), asked, answer, SUDOKU_DIGIT_OUTCOMES, (level) => level >= SUDOKU_BREAKS_FROM ? "breaks" : level ? "risk" : "");
+};
+
+const cells = Array.from({ length: 81 }, () => $("board").appendChild(document.createElement("div")));
+function draw() {
+  cells.forEach((cell, i) => {
+    cell.className = (game.given[i] ? "given" : game.wrong[i] ? "mistake" : "")
+      + (offered.includes(i) ? " offered" : "") + (i === chosen ? " chosen" : "") + (i === fresh ? " fresh" : "");
+    cell.textContent = game.grid[i] || "";
+    if (game.wrong[i]) cell.append(Object.assign(document.createElement("small"), { textContent: game.wrong[i] }));
+  });
+  $("board").style.opacity = picker.ready ? 1 : 0.45;
+}
+
+function showStats() {
+  $("filled").textContent = `${game.filled} of ${game.blanks}`;
+  $("mistakes").textContent = game.mistakes;
+  $("puzzles").textContent = stats.puzzles;
+  $("average").textContent = stats.puzzles ? (stats.mistakes / stats.puzzles).toFixed(2) : "\u2013";
+  $("count").textContent = stats.decisions.toLocaleString();
+  $("matched").textContent = stats.decisions ? `${stats.matched.toLocaleString()} of ${stats.decisions.toLocaleString()}` : "\u2013";
+  if (recent.length) {
+    const mean = (key) => recent.reduce((sum, r) => sum + r[key], 0) / recent.length;
+    $("mlaMs").textContent = mean("mla").toFixed(1);
+    $("trip").textContent = mean("trip").toFixed(0) + " ms";
+    $("rate").textContent = recent.filter((r) => performance.now() - r.at < 1000).length;
+  }
+}
+
+function showLevel() {
+  $("level").value = game.level;
+  $("levelNote").textContent = LEVEL_NOTES[game.level];
+  // The page describes the game as it is being played.
+  $("tagline").textContent = "Laya fills the grid on the Modalix MLA, two decisions a cell: which cell, then which digit"
+    + (game.level === "hard" ? ", and a risk where no digit is certain" : "");
+}
+
+function newPuzzle(level) {
+  seed = (seed * 31 + 7) & 0xfffff;
+  game.reset(seed, level);
+  round++;
+  offered = []; chosen = fresh = -1;
+  $("hint").textContent = picker.ready ? "Two decisions per cell" : "No model is on the MLA. Load one in the Models tab.";
+  $("cellOptions").replaceChildren(); $("digitOptions").replaceChildren();
+  draw(); showStats();
+}
+
+async function loop() {
+  if (looping) return;
+  looping = true;
+  // Watch speed is about three cells a second; otherwise the model sets the pace.
+  const pace = async (started) => sleep($("speed").value === "watch" ? Math.max(0, 160 - (performance.now() - started)) : 0);
+  while (auto && picker.ready) {
+    if (game.done) { await sleep(2200); if (!auto || !picker.ready) break; newPuzzle(); }
+    const playing = round;
+    try {
+      let started = performance.now();
+      const where = game.cellQuestion();
+      offered = where.cells; chosen = fresh = -1; draw();
+      const name = await decide(SUDOKU_CELL_STATE, where, showCell);
+      if (playing !== round) continue;             // a new puzzle began while the model was deciding
+      chosen = where.cells.find((i) => sudokuCellName(i) === name);
+      draw(); showStats();
+      await pace(started);
+      if (playing !== round) continue;
+      started = performance.now();
+      const digit = await decide(SUDOKU_DIGIT_STATE, game.digitQuestion(chosen), showDigit);
+      if (playing !== round) continue;
+      game.place(chosen, digit);
+      fresh = chosen; offered = []; chosen = -1;
+      if (game.done) {
+        stats.puzzles++; stats.mistakes += game.mistakes;
+        $("hint").textContent = (game.mistakes ? `Finished with ${game.mistakes} mistake${game.mistakes === 1 ? "" : "s"}` : "Solved without a mistake")
+          + ". A new puzzle starts in a moment.";
+      }
+      draw(); showStats();
+      await pace(started);
+    } catch (error) {
+      if (error instanceof NotLoaded) { picker.lost(); break; }
+      $("error").hidden = false; $("error").textContent = error.message;
+      setAuto(false);
+      break;
+    }
+    $("error").hidden = true;
+  }
+  looping = false;
+}
+
+function setAuto(value) {
+  auto = value;
+  $("auto").textContent = auto ? "Pause" : "Resume";
+  $("auto").classList.toggle("primary", !auto);
+  if (auto) loop();
+}
+
+function setReady(ready) {
+  $("restart").disabled = $("auto").disabled = !ready;
+  $("hint").textContent = ready ? "Two decisions per cell" : "No model is on the MLA. Load one in the Models tab.";
+  draw();
+  if (ready && auto) loop();
+}
+
+$("auto").onclick = () => setAuto(!auto);
+$("restart").onclick = () => { newPuzzle(); if (auto) loop(); };
+$("resetScores").onclick = () => { stats = start(); recent.length = 0; showStats(); };
+// A puzzle of another level is another game: it starts over, and so do the scores.
+$("level").onchange = () => {
+  newPuzzle($("level").value);
+  Object.assign(stats, { puzzles: 0, mistakes: 0 });
+  try { localStorage.setItem("laya.sudoku.level", game.level); } catch (_) { /* not kept */ }
+  showLevel(); showStats();
+  if (auto) loop();
+};
+
+const picker = createModelPicker({ mount: $("picker"), onReady: setReady });
+showLevel(); draw(); showStats();
+</script>
+</body>
+</html>

@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
+<title>Blackjack &middot; Laya on Modalix</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f4b; --warn: #b45309; --bad: #c0362c;
+    --track: #e8ebf1; --chip: #eef2f8; --field: #ffffff; --sky: #f9fafc; --you: #b45309;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebf0; --muted: #98a2b3; --line: #2a303a;
+      --accent: #5b9dff; --accent-ink: #0b1220; --good: #4cc38a; --warn: #f0a84b; --bad: #f47067;
+      --track: #232934; --chip: #1f252e; --field: #11151a; --sky: #12161b; --you: #f0a84b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 18px 24px 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid transparent; font-size: 14px; }
+  nav a:hover { border-color: var(--line); }
+  nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
+  main { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 16px;
+         padding: 0 24px 32px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 0 16px 24px; }
+                              header { padding: 16px 16px 10px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .controls { margin-top: 12px; justify-content: space-between; }
+  .hint { color: var(--muted); font-size: 13.5px; }
+  kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+        padding: 1px 6px; background: var(--chip); color: var(--ink); }
+  button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--chip); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-variant-numeric: tabular-nums; font-size: 16px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero .value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .hero .unit { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+        font: 12.5px/1.4 var(--mono); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bar { display: grid; grid-template-columns: 48px minmax(0, 1fr) 52px; gap: 8px; align-items: center;
+         margin-top: 6px; font-size: 13.5px; }
+  .bar .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .bar.top .track i { opacity: 1; }
+  .bar.top .name { font-weight: 650; }
+  .bar .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .block { margin-top: 16px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px; }
+  .slider-head { display: flex; justify-content: space-between; font-size: 13.5px; }
+  .slider-head b { font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .error { color: var(--bad); margin-top: 10px; overflow-wrap: anywhere; }
+  .gamebar { display: flex; gap: 6px; align-items: center; padding: 0 24px 12px; color: var(--muted); font-size: 14px; }
+  .gamebar a { color: var(--muted); text-decoration: none; padding: 3px 12px; border-radius: 8px; border: 1px solid var(--line); }
+  .gamebar a.here { color: var(--ink); background: var(--chip); border-color: var(--accent); }
+  @media (max-width: 900px) { .gamebar { padding: 0 16px 10px; } }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+  select { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 8px; }
+  .felt { background: var(--sky); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-height: 290px; }
+  .seat { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 4px 12px; align-items: center; margin-bottom: 14px; }
+  .seat .who { font-weight: 650; }
+  .seat .total { color: var(--muted); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  .cards { display: flex; flex-wrap: wrap; gap: 8px; min-height: 76px; }
+  .card { width: 52px; height: 74px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel);
+          display: flex; flex-direction: column; justify-content: space-between; padding: 5px 7px;
+          font-weight: 650; font-size: 17px; line-height: 1; }
+  .card .suit { align-self: flex-end; font-size: 19px; }
+  .card.red { color: var(--bad); }
+  .card.back { background: repeating-linear-gradient(45deg, var(--chip), var(--chip) 5px, var(--track) 5px, var(--track) 10px); }
+  .outcome { min-height: 26px; font-weight: 650; }
+  .outcome.win { color: var(--good); } .outcome.loss { color: var(--bad); } .outcome.push { color: var(--muted); }
+  .bar { grid-template-columns: minmax(96px, 34%) minmax(0, 1fr) 52px; }
+  .bar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .name small { color: var(--muted); font-weight: 400; }
+  table.chart { border-collapse: separate; border-spacing: 2px; font: 12px var(--mono); margin-top: 6px; }
+  table.chart th { color: var(--muted); font-weight: 400; padding: 0 3px; text-align: center; }
+  table.chart td { width: 22px; height: 19px; text-align: center; border-radius: 3px; background: var(--track); }
+  table.chart td.hit { background: var(--accent); color: var(--accent-ink); }
+  table.chart td.stand { background: var(--chip); color: var(--ink); }
+  table.chart td.differs { outline: 2px solid var(--warn); outline-offset: -1px; }
+  .charts { display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: flex-start; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+  .gamebar { flex-wrap: wrap; }
+  .bet { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0 9px; font-size: 13px;
+         font-variant-numeric: tabular-nums; margin-top: 3px; background: var(--panel); }
+  .group { display: grid; grid-template-columns: 96px minmax(0, 1fr) 56px; gap: 8px; align-items: center; font-size: 13.5px; margin-top: 5px; }
+  .group .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .group .track i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+  .group .n { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .memline { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; align-items: center; }
+  .memline b { font-variant-numeric: tabular-nums; }
+  button.small { padding: 3px 10px; font-size: 13.5px; }
+  .asked { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+</style>
+<link rel="stylesheet" href="/static/neat.css">
+</head>
+<body>
+<header>
+  <h1>Blackjack</h1>
+  <p>Laya bets, doubles, hits and stands on the Modalix MLA, remembering the cards it has seen</p>
+  <nav><a href="/">Debate</a><a href="/questions">Questions</a><a class="here" href="/games">Games</a><a href="/models">Models</a></nav>
+</header>
+<script src="/static/brand.js"></script>
+<div class="gamebar">Games <a href="/games">Dino Arena</a><a class="here" href="/games/blackjack">Blackjack</a><a href="/games/snake">Snake</a><a href="/games/sudoku">Sudoku</a>
+  <div id="picker"></div></div>
+<main>
+  <section>
+    <h2>Table</h2>
+    <div class="felt">
+      <div class="seat"><div><div class="who">Dealer</div><div class="total" id="dealerTotal">&nbsp;</div></div>
+        <div class="cards" id="dealerCards"></div></div>
+      <div class="seat"><div><div class="who">Laya</div><div class="total" id="playerTotal">&nbsp;</div><div class="bet" id="bet" hidden></div></div>
+        <div class="cards" id="playerCards"></div></div>
+      <div class="outcome" id="outcome"></div>
+    </div>
+    <div class="row controls">
+      <span class="hint" id="hint">One deck &middot; dealer stands on 17 &middot; blackjack pays 3 to 2 &middot; double on 9, 10 or 11</span>
+      <span class="row">
+        <select id="speed" aria-label="Speed">
+          <option value="watch">Watch Speed</option>
+          <option value="fast">As Fast As It Decides</option>
+        </select>
+        <button id="deal">Deal One Hand</button>
+        <button id="auto">Pause</button>
+      </span>
+    </div>
+    <div class="scores">
+      <div class="stat"><b id="hands">0</b><span>hands played</span></div>
+      <div class="stat"><b id="net">0</b><span>net units won</span></div>
+      <div class="stat"><b id="flat">0</b><span>same play, always betting 1</span></div>
+      <div class="stat"><b id="record">0 / 0 / 0</b><span>won / pushed / lost</span></div>
+    </div>
+    <div class="row controls"><span class="hint">Scores are kept until reset.</span><button class="small" id="resetScores">Reset Scores</button></div>
+    <div class="error" id="error" hidden></div>
+
+    <div class="block">
+      <h2>The hit-or-stand strategy it plays from a fresh deck</h2>
+      <div class="charts" id="charts"></div>
+      <div class="legend"><span><i style="background:var(--accent)"></i>hit</span><span><i style="background:var(--chip);border:1px solid var(--line)"></i>stand</span>
+        <span><i style="outline:2px solid var(--warn);outline-offset:-1px"></i>differs from basic strategy</span></div>
+      <p class="note" id="chartNote">Asked once per distinct description when the model is loaded.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Laya's decisions</h2>
+    <div class="hero"><span class="value" id="mlaMs">&ndash;</span><span class="unit">ms on the MLA per decision</span></div>
+    <div class="stats">
+      <div class="stat"><b id="count">0</b><span>decisions made</span></div>
+      <div class="stat"><b id="matched">&ndash;</b><span>took the intended action</span></div>
+      <div class="stat"><b id="trip">&ndash;</b><span>browser round trip</span></div>
+      <div class="stat"><b id="perHand">&ndash;</b><span>decisions per hand</span></div>
+    </div>
+
+    <div class="block">
+      <h2>What it remembers</h2>
+      <div class="memline"><span><b id="seen">0</b> of 52 cards seen &middot; count <b id="running">0</b> &middot; per deck left <b id="true">0.0</b></span>
+        <button class="small" id="resetCount" title="Forget the cards seen and shuffle a fresh deck">Reset Count</button></div>
+      <div id="groups"></div>
+      <p class="note">The harness keeps every card shown since the shuffle. The count is Hi-Lo: +1 for each 2&ndash;6 seen,
+        &minus;1 for each ten or ace. The model itself keeps nothing between questions; it is told what the memory implies, in words.</p>
+    </div>
+    <div class="block">
+      <h2>What it is asked</h2>
+      <p class="asked" id="asked">&ndash;</p>
+      <pre id="sees">&ndash;</pre>
+    </div>
+    <div class="block">
+      <h2>Which rule it picks</h2>
+      <div id="probs"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/blackjack-core.js"></script>
+<script src="/static/model-picker.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  for (const child of children) node.append(child);
+  return node;
+};
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const against = (card) => card.rank === 0 || cardValue(card) === 8 ? "an " + (card.rank === 0 ? "ace" : 8) : "a " + cardValue(card);
+const signed = (value) => (value > 0 ? "+" : "") + (Number.isInteger(value) ? value : value.toFixed(1));
+
+const QUESTIONS = {
+  bet: { title: "Before the hand: how much to bet", question: BET_QUESTION, actions: Object.fromEntries(Object.entries(BET_UNITS).map(([k, v]) => [k, "bet " + v])) },
+  double: { title: "Two cards, 9 to 11: double down?", question: DOUBLE_QUESTION, actions: DOUBLE_ACTIONS },
+  play: { title: "Hit or stand?", question: PLAY_QUESTION, actions: PLAY_ACTIONS },
+};
+
+let auto = true, playing = false, looping = false, forget = false;
+let shoe = new Shoe(Date.now() & 0xfffff);
+const fresh = () => ({ hands: 0, net: 0, flat: 0, won: 0, pushed: 0, lost: 0, decisions: 0, matched: 0 });
+let stats = fresh();
+const recent = [];
+
+class NotLoaded extends Error {}
+
+async function ask(kind, seen) {
+  const sent = performance.now();
+  const response = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: picker.name, max_len: picker.budget, state: seen, questions: { rule: QUESTIONS[kind].question } }) });
+  const body = await response.json();
+  if (body.not_loaded) throw new NotLoaded(body.error);
+  if (body.error) throw new Error(body.error);
+  picker.report(body.usage);
+  recent.push({ mla: body.usage.mla_ms, trip: performance.now() - sent });
+  while (recent.length > 40) recent.shift();
+  return body.answers.rule;
+}
+
+// One decision during play: ask, count it, show it.
+async function decide(kind, seen) {
+  const answer = await ask(kind, seen);
+  stats.decisions++;
+  // Two rules can lead to the same action; what counts is the action.
+  const actions = QUESTIONS[kind].actions;
+  if (actions[answer.choice] === actions[intendedRule(seen)]) stats.matched++;
+  showDecision(kind, seen, answer);
+  showStats();
+  return answer.choice;
+}
+
+function drawCards(root, cards, hideSecond) {
+  root.replaceChildren(...cards.map((card, index) => hideSecond && index === 1
+    ? el("div", { className: "card back", ariaLabel: "face-down card" })
+    : el("div", { className: "card" + (card.suit === 1 || card.suit === 2 ? " red" : ""), ariaLabel: RANKS[card.rank] + SUITS[card.suit] },
+         el("span", { textContent: RANKS[card.rank] }), el("span", { className: "suit", textContent: SUITS[card.suit] }))));
+}
+
+function showTable(player, dealer, hideHole) {
+  drawCards($("playerCards"), player, false);
+  drawCards($("dealerCards"), dealer, hideHole);
+  const mine = handValue(player);
+  $("playerTotal").textContent = player.length ? (mine.soft && mine.total < 21 ? "soft " : "") + mine.total : "\u00a0";
+  $("dealerTotal").textContent = !dealer.length ? "\u00a0" : hideHole ? "shows " + (dealer[0].rank === 0 ? "an ace" : cardValue(dealer[0]))
+                                                                     : String(handValue(dealer).total);
+}
+
+function showDecision(kind, seen, answer) {
+  const { title, question, actions } = QUESTIONS[kind];
+  $("asked").textContent = title;
+  $("sees").textContent = seen;
+  const root = $("probs");
+  if (root.dataset.kind !== kind) {
+    root.dataset.kind = kind;
+    root.replaceChildren(...Object.entries(question.criteria).map(([rule, text]) => {
+      const row = el("div", { className: "bar", title: text });
+      row.dataset.rule = rule;
+      row.innerHTML = '<span class="name"></span><span class="track"><i></i></span><span class="pct"></span>';
+      row.querySelector(".name").append(actions[rule], " ", el("small", { textContent: text }));
+      return row;
+    }));
+  }
+  for (const row of root.children) {
+    const p = answer.probabilities[row.dataset.rule];
+    row.classList.toggle("top", row.dataset.rule === answer.choice);
+    row.querySelector("i").style.width = (p * 100).toFixed(1) + "%";
+    row.querySelector(".pct").textContent = (p * 100).toFixed(1) + "%";
+  }
+}
+
+function showMemory() {
+  $("seen").textContent = shoe.remembered;
+  $("running").textContent = signed(shoe.running);
+  $("true").textContent = signed(Math.round(shoe.trueCount * 10) / 10);
+  const left = shoe.groupsLeft(), full = [20, 12, 20], names = ["2 to 6", "7 to 9", "tens, aces"];
+  $("groups").replaceChildren(...names.map((name, i) => {
+    const fill = el("i"); fill.style.width = (left[i] / full[i] * 100) + "%";
+    return el("div", { className: "group" }, el("span", { textContent: name }), el("span", { className: "track" }, fill),
+              el("span", { className: "n", textContent: `${left[i]} left` }));
+  }));
+}
+
+function showStats() {
+  $("hands").textContent = stats.hands.toLocaleString();
+  $("net").textContent = signed(stats.net);
+  $("flat").textContent = signed(stats.flat);
+  $("record").textContent = `${stats.won} / ${stats.pushed} / ${stats.lost}`;
+  $("count").textContent = stats.decisions.toLocaleString();
+  $("matched").textContent = stats.decisions ? `${stats.matched} of ${stats.decisions}` : "\u2013";
+  $("perHand").textContent = stats.hands ? (stats.decisions / stats.hands).toFixed(1) : "\u2013";
+  if (recent.length) {
+    const mean = (key) => recent.reduce((sum, r) => sum + r[key], 0) / recent.length;
+    $("mlaMs").textContent = mean("mla").toFixed(1);
+    $("trip").textContent = mean("trip").toFixed(0) + " ms";
+  }
+}
+
+async function playHand() {
+  if (playing || !picker.ready) return;
+  playing = true;
+  const pace = () => sleep($("speed").value === "watch" ? 420 : 0);
+  const take = (cards) => { const card = shoe.draw(); cards.push(card); return card; };
+  const show = (card) => { shoe.remember(card); showMemory(); };
+  let player = [], dealer = [], stake = 1, bet = 1;
+  try {
+    if (forget || shoe.needsShuffle) {
+      shoe.shuffle(); forget = false;
+      showMemory();
+      $("hint").textContent = "Shuffled: the memory starts again";
+    }
+    $("outcome").textContent = ""; $("outcome").className = "outcome";
+    showTable([], [], true);
+    bet = BET_UNITS[await decide("bet", betFacts(shoe.trueCount))];
+    $("bet").hidden = false; $("bet").textContent = `bet ${bet}`;
+    await pace();
+    show(take(player)); show(take(dealer)); show(take(player)); take(dealer);      // the hole card stays unseen
+    const upcard = cardValue(dealer[0]);
+    showTable(player, dealer, true);
+    await pace();
+    if (!isBlackjack(player) && !isBlackjack(dealer)) {
+      const first = handValue(player);
+      if (canDouble(player) && DOUBLE_ACTIONS[await decide("double", doubleFacts(first.total, first.soft, upcard, shoe.valueOdds()))] === "double") {
+        stake = 2;
+        $("bet").textContent = `bet ${bet} \u00d7 2`;
+        $("hint").textContent = `On ${first.total} against ${against(dealer[0])}: double`;
+        await pace();
+        show(take(player));
+        showTable(player, dealer, true);
+        await pace();
+      } else {
+        for (;;) {
+          const { total, soft } = handValue(player);
+          if (total >= 21) break;
+          const action = PLAY_ACTIONS[await decide("play", playFacts(total, soft, upcard, shoe.valueOdds()))];
+          $("hint").textContent = `On ${soft ? "soft" : "hard"} ${total} against ${against(dealer[0])}: ${action}`;
+          await pace();
+          if (action === "stand") break;
+          show(take(player));
+          showTable(player, dealer, true);
+          await pace();
+        }
+      }
+    }
+  } catch (error) {
+    playing = false;
+    forget = true;                       // the hand was abandoned: start the next from a fresh deck
+    if (error instanceof NotLoaded) return picker.lost();
+    $("error").hidden = false; $("error").textContent = error.message;
+    setAuto(false);
+    return;
+  }
+  $("error").hidden = true;
+  show(dealer[1]);
+  showTable(player, dealer, false);
+  await pace();
+  if (handValue(player).total <= 21 && !isBlackjack(player)) {
+    while (handValue(dealer).total < 17) { show(take(dealer)); showTable(player, dealer, false); await pace(); }
+  }
+  const units = settle(player, dealer) * stake;
+  stats.hands++; stats.net += units * bet; stats.flat += units;
+  if (units > 0) stats.won++; else if (units < 0) stats.lost++; else stats.pushed++;
+  const mine = handValue(player).total, won = units * bet;
+  $("outcome").textContent = (isBlackjack(player) && units > 0 ? "Blackjack" : mine > 21 ? "Bust" : units > 0 ? "Laya wins" : units < 0 ? "Dealer wins" : "Push")
+    + (won ? ", " + signed(won).replace("-", "\u2212") : "");
+  $("outcome").className = "outcome " + (units > 0 ? "win" : units < 0 ? "loss" : "push");
+  showStats();
+  playing = false;
+}
+
+async function autoLoop() {
+  if (looping) return;
+  looping = true;
+  while (auto && picker.ready) {
+    await playHand();
+    await sleep($("speed").value === "watch" ? 1100 : 0);
+  }
+  looping = false;
+}
+
+function setAuto(value) {
+  auto = value;
+  $("auto").textContent = auto ? "Pause" : "Auto-Play";
+  $("auto").classList.toggle("primary", !auto);
+  if (auto) autoLoop();
+}
+
+// The hit-or-stand chart from a fresh deck: one request per distinct description of a hand.
+async function drawCharts() {
+  const upcards = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], played = new Map();
+  let agree = 0, hands = 0;
+  const tables = [];
+  for (const [soft, from, to] of [[false, 5, 21], [true, 13, 21]]) {
+    const table = el("table", { className: "chart" });
+    table.append(el("tr", {}, el("th", { textContent: soft ? "soft" : "hard" }), ...upcards.map((up) => el("th", { textContent: up === 11 ? "A" : up }))));
+    for (let total = to; total >= from; total--) {
+      const row = el("tr", {}, el("th", { textContent: total }));
+      for (const up of upcards) {
+        const seen = playFacts(total, soft, up, FRESH_ODDS);
+        if (!played.has(seen)) played.set(seen, PLAY_ACTIONS[(await ask("play", seen)).choice]);
+        const action = played.get(seen), same = action === basicStrategy(total, soft, up, false);
+        hands++; agree += same;
+        row.append(el("td", { className: action + (same ? "" : " differs"), textContent: action === "hit" ? "H" : "S",
+                              title: `${soft ? "soft" : "hard"} ${total} vs ${up === 11 ? "ace" : up}: ${action}` + (same ? "" : " (basic strategy differs)") }));
+      }
+      table.append(row);
+    }
+    tables.push(table);
+  }
+  $("charts").replaceChildren(...tables);
+  $("chartNote").textContent = `${agree} of ${hands} hands as basic strategy would play them, from ${played.size} distinct descriptions. ` +
+    "During play the descriptions come from the cards remembered, so the same hand can be described differently late in a deck.";
+}
+
+async function setReady(ready) {
+  $("deal").disabled = $("auto").disabled = !ready;
+  if (!ready) {
+    $("outcome").className = "outcome push";
+    $("outcome").textContent = "No model is on the MLA. Load one in the Models tab; play starts by itself.";
+    return;
+  }
+  $("outcome").textContent = "";
+  $("error").hidden = true;
+  try { await drawCharts(); } catch (error) {
+    if (error instanceof NotLoaded) return picker.lost();
+    $("error").hidden = false; $("error").textContent = error.message;
+  }
+  if (auto) autoLoop();
+}
+
+$("deal").onclick = () => { setAuto(false); playHand(); };
+$("auto").onclick = () => setAuto(!auto);
+$("resetScores").onclick = () => { stats = fresh(); recent.length = 0; showStats(); };
+$("resetCount").onclick = () => {
+  // Forgetting the cards only makes sense with a fresh deck, or the memory would be wrong.
+  if (playing) { forget = true; $("hint").textContent = "The count resets, with a fresh deck, after this hand"; return; }
+  shoe.shuffle(); showMemory();
+  $("hint").textContent = "Count reset: fresh deck, nothing remembered";
+};
+
+showMemory();
+showStats();
+const picker = createModelPicker({ mount: $("picker"), onReady: setReady });
+</script>
+</body>
+</html>

@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
+<title>Snake &middot; Laya on Modalix</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f4b; --warn: #b45309; --bad: #c0362c;
+    --track: #e8ebf1; --chip: #eef2f8; --field: #ffffff; --sky: #f9fafc; --you: #b45309;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebf0; --muted: #98a2b3; --line: #2a303a;
+      --accent: #5b9dff; --accent-ink: #0b1220; --good: #4cc38a; --warn: #f0a84b; --bad: #f47067;
+      --track: #232934; --chip: #1f252e; --field: #11151a; --sky: #12161b; --you: #f0a84b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 18px 24px 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid transparent; font-size: 14px; }
+  nav a:hover { border-color: var(--line); }
+  nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
+  main { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 16px;
+         padding: 0 24px 32px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 0 16px 24px; }
+                              header { padding: 16px 16px 10px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .controls { margin-top: 12px; justify-content: space-between; }
+  .hint { color: var(--muted); font-size: 13.5px; }
+  kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+        padding: 1px 6px; background: var(--chip); color: var(--ink); }
+  button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--chip); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-variant-numeric: tabular-nums; font-size: 16px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero .value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .hero .unit { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+        font: 12.5px/1.4 var(--mono); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bar { display: grid; grid-template-columns: 48px minmax(0, 1fr) 52px; gap: 8px; align-items: center;
+         margin-top: 6px; font-size: 13.5px; }
+  .bar .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .bar.top .track i { opacity: 1; }
+  .bar.top .name { font-weight: 650; }
+  .bar .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .block { margin-top: 16px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px; }
+  .slider-head { display: flex; justify-content: space-between; font-size: 13.5px; }
+  .slider-head b { font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .error { color: var(--bad); margin-top: 10px; overflow-wrap: anywhere; }
+  .gamebar { display: flex; gap: 6px; align-items: center; padding: 0 24px 12px; color: var(--muted); font-size: 14px; }
+  .gamebar a { color: var(--muted); text-decoration: none; padding: 3px 12px; border-radius: 8px; border: 1px solid var(--line); }
+  .gamebar a.here { color: var(--ink); background: var(--chip); border-color: var(--accent); }
+  @media (max-width: 900px) { .gamebar { padding: 0 16px 10px; } }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+  select { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 8px; }
+  .felt { background: var(--sky); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-height: 290px; }
+  .seat { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 4px 12px; align-items: center; margin-bottom: 14px; }
+  .seat .who { font-weight: 650; }
+  .seat .total { color: var(--muted); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  .cards { display: flex; flex-wrap: wrap; gap: 8px; min-height: 76px; }
+  .card { width: 52px; height: 74px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel);
+          display: flex; flex-direction: column; justify-content: space-between; padding: 5px 7px;
+          font-weight: 650; font-size: 17px; line-height: 1; }
+  .card .suit { align-self: flex-end; font-size: 19px; }
+  .card.red { color: var(--bad); }
+  .card.back { background: repeating-linear-gradient(45deg, var(--chip), var(--chip) 5px, var(--track) 5px, var(--track) 10px); }
+  .outcome { min-height: 26px; font-weight: 650; }
+  .outcome.win { color: var(--good); } .outcome.loss { color: var(--bad); } .outcome.push { color: var(--muted); }
+  .bar { grid-template-columns: minmax(96px, 34%) minmax(0, 1fr) 52px; }
+  .bar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .name small { color: var(--muted); font-weight: 400; }
+  table.chart { border-collapse: separate; border-spacing: 2px; font: 12px var(--mono); margin-top: 6px; }
+  table.chart th { color: var(--muted); font-weight: 400; padding: 0 3px; text-align: center; }
+  table.chart td { width: 22px; height: 19px; text-align: center; border-radius: 3px; background: var(--track); }
+  table.chart td.hit { background: var(--accent); color: var(--accent-ink); }
+  table.chart td.stand { background: var(--chip); color: var(--ink); }
+  table.chart td.differs { outline: 2px solid var(--warn); outline-offset: -1px; }
+  .charts { display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: flex-start; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+  .gamebar { flex-wrap: wrap; }
+  .bet { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0 9px; font-size: 13px;
+         font-variant-numeric: tabular-nums; margin-top: 3px; background: var(--panel); }
+  .group { display: grid; grid-template-columns: 96px minmax(0, 1fr) 56px; gap: 8px; align-items: center; font-size: 13.5px; margin-top: 5px; }
+  .group .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .group .track i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+  .group .n { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .memline { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; align-items: center; }
+  .memline b { font-variant-numeric: tabular-nums; }
+  button.small { padding: 3px 10px; font-size: 13.5px; }
+  .asked { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+  canvas { display: block; margin: 0 auto; border-radius: 8px; background: var(--sky); border: 1px solid var(--line); }
+  .boardhead { justify-content: space-between; margin-bottom: 10px; }
+  .boardhead h2 { margin: 0; }
+  .gridrow { gap: 6px 8px; }
+  .gridrow label { color: var(--muted); font-size: 13.5px; }
+  .gridrow input[type=number] { width: 64px; font: inherit; color: var(--ink); background: var(--field);
+                                border: 1px solid var(--line); border-radius: 8px; padding: 5px 6px; }
+  .option { display: grid; grid-template-columns: 70px minmax(0, 1fr) 52px; gap: 8px; align-items: center; margin-top: 7px; font-size: 13.5px; }
+  .option .what { color: var(--muted); }
+  .option .move { font-weight: 400; }
+  .option.top .move { font-weight: 650; }
+  .option .track { grid-column: 2; height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .option .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .option.top .track i { opacity: 1; }
+  .option .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .option.fatal .what { color: var(--bad); }
+</style>
+<link rel="stylesheet" href="/static/neat.css">
+</head>
+<body>
+<header>
+  <h1>Snake</h1>
+  <p id="tagline">Laya picks every move on the Modalix MLA from a description of where each one leads</p>
+  <nav><a href="/">Debate</a><a href="/questions">Questions</a><a class="here" href="/games">Games</a><a href="/models">Models</a></nav>
+</header>
+<script src="/static/brand.js"></script>
+<div class="gamebar">Games <a href="/games">Dino Arena</a><a href="/games/blackjack">Blackjack</a><a class="here" href="/games/snake">Snake</a><a href="/games/sudoku">Sudoku</a>
+  <div id="picker"></div></div>
+<main>
+  <section>
+    <div class="row boardhead">
+      <h2>Board</h2>
+      <span class="row gridrow">
+        <label for="sight">Laya sees</label>
+        <select id="sight" aria-label="How much of the board Laya sees"></select>
+        <label for="gridSize">Grid</label>
+        <select id="gridSize" aria-label="Grid size"></select>
+        <input type="number" id="cols" aria-label="Columns"> <span class="hint">columns by</span>
+        <input type="number" id="rows" aria-label="Rows"> <span class="hint">rows</span>
+      </span>
+    </div>
+    <div id="boardwrap"><canvas id="board" width="800" height="560" aria-label="Snake board"></canvas></div>
+    <div class="row controls">
+      <span class="hint" id="hint">One decision per move</span>
+      <span class="row">
+        <select id="speed" aria-label="Speed">
+          <option value="watch">Watch Speed</option>
+          <option value="fast">As Fast As It Decides</option>
+        </select>
+        <button id="restart">New Game</button>
+        <button id="auto">Pause</button>
+      </span>
+    </div>
+    <div class="scores">
+      <div class="stat"><b id="eaten">0</b><span>food eaten this game</span></div>
+      <div class="stat"><b id="best">0</b><span>best game</span></div>
+      <div class="stat"><b id="games">0</b><span>games finished</span></div>
+      <div class="stat"><b id="average">&ndash;</b><span>average food per game</span></div>
+    </div>
+    <div class="row controls"><span class="hint">Scores are kept until reset, and start over when the grid or what Laya sees changes.</span><button class="small" id="resetScores">Reset Scores</button></div>
+    <div class="error" id="error" hidden></div>
+  </section>
+
+  <section>
+    <h2>Laya's decisions</h2>
+    <div class="hero"><span class="value" id="mlaMs">&ndash;</span><span class="unit">ms on the MLA per decision</span></div>
+    <div class="stats">
+      <div class="stat"><b id="rate">&ndash;</b><span>moves per second</span></div>
+      <div class="stat"><b id="count">0</b><span>decisions made</span></div>
+      <div class="stat"><b id="matched">&ndash;</b><span>picked a best-described move</span></div>
+      <div class="stat"><b id="trip">&ndash;</b><span>browser round trip</span></div>
+    </div>
+    <div class="block">
+      <h2>What it is told</h2>
+      <pre id="sees">&ndash;</pre>
+      <p class="note" id="sightNote"></p>
+    </div>
+    <div class="block">
+      <h2>Which move it picks</h2>
+      <div id="options"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/snake-core.js"></script>
+<script src="/static/model-picker.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const canvas = $("board"), ctx = canvas.getContext("2d");
+
+// The grid is the user's to change, and is remembered in this browser.
+const GRID_SIZES = { "Small": { cols: 10, rows: 8 }, "Standard": SNAKE_GRID, "Large": { cols: 30, rows: 20 }, "Huge": { cols: 60, rows: 40 } };
+function savedGrid() {
+  try { const grid = JSON.parse(localStorage.getItem("laya.snake.grid")); if (grid && grid.cols && grid.rows) return grid; } catch (_) { /* none saved */ }
+  return SNAKE_GRID;
+}
+
+// So is how much of the board goes into the descriptions: all of it, or a few squares around the head.
+const SIGHTS = [Infinity, 12, 8, 5, 3, 2, 1];
+function savedSight() {
+  try { const sight = Number(localStorage.getItem("laya.snake.sight")); if (SIGHTS.includes(sight)) return sight; } catch (_) { /* none saved */ }
+  return Infinity;
+}
+
+let seed = Date.now() & 0xfffff;
+const world = new SnakeWorld(seed, savedGrid(), savedSight());
+let auto = true, looping = false, game = 0;
+const fresh = () => ({ best: 0, games: 0, food: 0, decisions: 0, matched: 0 });
+let stats = fresh();
+const recent = [];
+
+class NotLoaded extends Error {}
+
+async function decide() {
+  const { outcomes, question } = world.question();
+  const sent = performance.now();
+  const response = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: picker.name, max_len: picker.budget, state: SNAKE_STATE, questions: { move: question } }) });
+  const body = await response.json();
+  if (body.not_loaded) throw new NotLoaded(body.error);
+  if (body.error) throw new Error(body.error);
+  picker.report(body.usage);
+  const answer = body.answers.move;
+  recent.push({ at: performance.now(), mla: body.usage.mla_ms, trip: performance.now() - sent });
+  while (recent.length > 60) recent.shift();
+  stats.decisions++;
+  if (outcomes[answer.choice] === Math.min(...Object.values(outcomes))) stats.matched++;
+  showDecision(outcomes, answer);
+  return answer.choice;
+}
+
+function showDecision(outcomes, answer) {
+  $("sees").textContent = SNAKE_STATE;
+  const root = $("options");
+  if (!root.children.length) {
+    for (const move of SNAKE_MOVES) {
+      const row = document.createElement("div"); row.className = "option"; row.dataset.move = move;
+      row.innerHTML = '<span class="move"></span><span class="what"></span><span class="pct"></span><span class="track"><i></i></span>';
+      row.querySelector(".move").textContent = move;
+      root.append(row);
+    }
+  }
+  for (const row of root.children) {
+    const move = row.dataset.move, p = answer.probabilities[move];
+    row.className = "option" + (move === answer.choice ? " top" : "") + (outcomes[move] >= SNAKE_FATAL_FROM ? " fatal" : "");
+    row.querySelector(".what").textContent = SNAKE_OUTCOMES[outcomes[move]];
+    row.querySelector("i").style.width = (p * 100).toFixed(1) + "%";
+    row.querySelector(".pct").textContent = (p * 100).toFixed(1) + "%";
+  }
+}
+
+function showStats() {
+  $("eaten").textContent = world.eaten;
+  $("best").textContent = Math.max(stats.best, world.eaten);
+  $("games").textContent = stats.games;
+  $("average").textContent = stats.games ? (stats.food / stats.games).toFixed(1) : "\u2013";
+  $("count").textContent = stats.decisions.toLocaleString();
+  $("matched").textContent = stats.decisions ? `${stats.matched.toLocaleString()} of ${stats.decisions.toLocaleString()}` : "\u2013";
+  if (recent.length) {
+    const mean = (key) => recent.reduce((sum, r) => sum + r[key], 0) / recent.length;
+    $("mlaMs").textContent = mean("mla").toFixed(1);
+    $("trip").textContent = mean("trip").toFixed(0) + " ms";
+    $("rate").textContent = recent.filter((r) => performance.now() - r.at < 1000).length;
+  }
+}
+
+function palette() {
+  const css = getComputedStyle(document.documentElement);
+  const get = (name) => css.getPropertyValue(name).trim();
+  return { line: get("--line"), muted: get("--muted"), good: get("--good"), bad: get("--bad"), accent: get("--accent"), ink: get("--ink"), panel: get("--panel"), veil: get("--sky") || get("--bg") };
+}
+let color = palette();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { color = palette(); draw(); });
+
+function draw() {
+  // Square cells, as large as the column is wide, but a tall grid still fits the window.
+  const ratio = window.devicePixelRatio || 1;
+  const cell = Math.min($("boardwrap").clientWidth / world.cols, Math.max(360, innerHeight * 0.75) / world.rows);
+  const width = Math.floor(cell * world.cols), height = Math.floor(cell * world.rows);
+  if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+    canvas.style.width = width + "px"; canvas.style.height = height + "px";
+    canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio);
+  }
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.strokeStyle = color.line; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
+  ctx.beginPath();
+  for (let x = 1; x < world.cols; x++) { ctx.moveTo(x * cell, 0); ctx.lineTo(x * cell, height); }
+  for (let y = 1; y < world.rows; y++) { ctx.moveTo(0, y * cell); ctx.lineTo(width, y * cell); }
+  ctx.stroke(); ctx.globalAlpha = 1;
+  world.body.forEach((part, i) => {
+    ctx.fillStyle = !world.alive ? color.muted : i === 0 ? color.accent : color.good;
+    const gap = Math.min(1.5, cell * 0.08);
+    ctx.beginPath(); ctx.roundRect(part.x * cell + gap, part.y * cell + gap, cell - 2 * gap, cell - 2 * gap, cell * 0.22); ctx.fill();
+  });
+  if (world.sight !== Infinity) {
+    // What is out of sight is veiled: the snake takes those squares to be empty.
+    const left = Math.max(0, world.head.x - world.sight) * cell, top = Math.max(0, world.head.y - world.sight) * cell;
+    const right = Math.min(world.cols, world.head.x + world.sight + 1) * cell, bottom = Math.min(world.rows, world.head.y + world.sight + 1) * cell;
+    ctx.fillStyle = color.veil; ctx.globalAlpha = 0.72;
+    ctx.beginPath(); ctx.rect(0, 0, width, height); ctx.rect(left, top, right - left, bottom - top); ctx.fill("evenodd");
+    ctx.globalAlpha = 1; ctx.strokeStyle = color.accent; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+    ctx.strokeRect(left + 0.75, top + 0.75, right - left - 1.5, bottom - top - 1.5);
+    ctx.setLineDash([]);
+  }
+  if (world.food) {                      // drawn last: it knows where the food is, in sight or not
+    ctx.fillStyle = color.bad;
+    ctx.beginPath(); ctx.arc((world.food.x + 0.5) * cell, (world.food.y + 0.5) * cell, cell * 0.32, 0, 6.3); ctx.fill();
+  }
+  if (!picker.ready || !world.alive) {
+    const text = !picker.ready ? "No model is on the MLA. Load one in the Models tab."
+                               : `The snake ${world.cause} after ${world.eaten} food`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = `600 ${Math.round(Math.max(11, Math.min(24, width / 28)))}px system-ui, sans-serif`;
+    // The message has to be readable over a board of any size, snake included.
+    const box = Math.min(width - 8, ctx.measureText(text).width + 28), line = parseInt(ctx.font.slice(4)) * 2;
+    ctx.fillStyle = color.panel; ctx.globalAlpha = 0.88;
+    ctx.beginPath(); ctx.roundRect((width - box) / 2, (height - line) / 2, box, line, 8); ctx.fill();
+    ctx.globalAlpha = 1; ctx.fillStyle = color.ink;
+    ctx.fillText(text, width / 2, height / 2, width - 20);
+  }
+}
+
+function newGame(grid) {
+  seed = (seed * 31 + 7) & 0xfffff;
+  world.reset(seed, grid);
+  game++;
+  $("hint").textContent = "One decision per move";
+  draw(); showStats();
+}
+
+async function loop() {
+  if (looping) return;
+  looping = true;
+  while (auto && picker.ready) {
+    if (!world.alive) { await sleep(1600); if (!auto || !picker.ready) break; newGame(); }
+    const started = performance.now(), asked = game;
+    let move;
+    try { move = await decide(); } catch (error) {
+      if (error instanceof NotLoaded) { picker.lost(); break; }
+      $("error").hidden = false; $("error").textContent = error.message;
+      setAuto(false);
+      break;
+    }
+    $("error").hidden = true;
+    if (asked !== game) continue;        // a new game began while the model was deciding
+    world.step(move);
+    if (!world.alive) {
+      stats.games++; stats.food += world.eaten; stats.best = Math.max(stats.best, world.eaten);
+      $("hint").textContent = `The snake ${world.cause}. A new game starts in a moment.`;
+    }
+    draw(); showStats();
+    // Watch speed is 8 moves a second; otherwise the model sets the pace.
+    await sleep($("speed").value === "watch" ? Math.max(0, 125 - (performance.now() - started)) : 0);
+  }
+  looping = false;
+}
+
+function setAuto(value) {
+  auto = value;
+  $("auto").textContent = auto ? "Pause" : "Resume";
+  $("auto").classList.toggle("primary", !auto);
+  if (auto) loop();
+}
+
+function setReady(ready) {
+  $("restart").disabled = $("auto").disabled = !ready;
+  draw();
+  if (ready && auto) loop();
+}
+
+$("auto").onclick = () => setAuto(!auto);
+$("restart").onclick = () => { newGame(); if (auto) loop(); };
+
+// A game on another grid is another game: it starts over, and so do the scores it is compared by.
+function showGrid() {
+  $("cols").value = world.cols; $("rows").value = world.rows;
+  const name = Object.keys(GRID_SIZES).find((key) => GRID_SIZES[key].cols === world.cols && GRID_SIZES[key].rows === world.rows);
+  $("gridSize").value = name || "Custom";
+}
+function setGrid(grid) {
+  if (!(Number(grid.cols) === world.cols && Number(grid.rows) === world.rows)) {
+    newGame(grid);                       // the world keeps the size within its limits
+    Object.assign(stats, { best: 0, games: 0, food: 0 });
+    try { localStorage.setItem("laya.snake.grid", JSON.stringify({ cols: world.cols, rows: world.rows })); } catch (_) { /* not kept */ }
+    showStats();
+    if (auto) loop();
+  }
+  showGrid();
+}
+for (const [name, grid] of Object.entries(GRID_SIZES)) $("gridSize").add(new Option(`${name}, ${grid.cols} \u00d7 ${grid.rows}`, name));
+$("gridSize").add(new Option("Custom", "Custom"));
+$("gridSize").onchange = () => { if (GRID_SIZES[$("gridSize").value]) setGrid(GRID_SIZES[$("gridSize").value]); else $("cols").focus(); };
+for (const [id, max] of [["cols", SNAKE_GRID_LIMITS.maxCols], ["rows", SNAKE_GRID_LIMITS.maxRows]]) {
+  Object.assign($(id), { min: SNAKE_GRID_LIMITS.min, max, step: 1 });
+  $(id).onchange = () => setGrid({ cols: $("cols").value, rows: $("rows").value });
+}
+showGrid();
+
+// Seeing less changes what the descriptions are worth, not the game: the game goes on, and
+// the scores start over because games played with different sight do not compare.
+function showSight() {
+  $("sight").value = String(world.sight);
+  const all = world.sight === Infinity, around = world.sight === 1 ? "the squares next to its head" : `the ${world.sight} squares around its head`;
+  // The page describes the game as it is being played: what Laya sees is part of that.
+  $("tagline").textContent = "Laya picks every move on the Modalix MLA from a description of where each one leads, "
+    + (all ? "worked out from the whole board" : `worked out from ${around} only`);
+  $("sightNote").textContent = "The model is not shown the board. The harness works out where each move leads and says it in a few words; "
+    + "those descriptions are the options of the question. "
+    + (all ? "They are worked out from the whole board, so they are true."
+           : `They are worked out from ${around} (the dashed box): the snake knows the edges of the board and where the food is, `
+             + "but not where the rest of its body is, so a move can be called safe that is not.");
+}
+for (const sight of SIGHTS) {
+  $("sight").add(new Option(sight === Infinity ? "the whole board" : sight === 1 ? "the next square only" : `${sight} squares around its head`, String(sight)));
+}
+$("sight").onchange = () => {
+  world.sight = Number($("sight").value);
+  Object.assign(stats, { best: 0, games: 0, food: 0 });
+  try { localStorage.setItem("laya.snake.sight", String(world.sight)); } catch (_) { /* not kept */ }
+  showSight(); draw(); showStats();
+};
+showSight();
+$("resetScores").onclick = () => { stats = fresh(); recent.length = 0; showStats(); };
+addEventListener("resize", draw);
+
+const picker = createModelPicker({ mount: $("picker"), onReady: setReady });
+draw(); showStats();
+</script>
+</body>
+</html>
