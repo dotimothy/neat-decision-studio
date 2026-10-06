@@ -154,8 +154,12 @@
   /* One column: the question, then the answer, each element under the last. */
   header, .gamebar, main, .pagehead, .hero-strip { max-width: 1180px; margin-left: auto; margin-right: auto; width: 100%; }
   /* The answer on top, the question at the bottom, where it stays in reach while scrolling. */
-  /* It only sticks where there is room for the chart, the figures and the verdict above it. */
-  @media (min-height: 800px) { .ask { position: sticky; bottom: 12px; box-shadow: 0 6px 28px rgba(0, 0, 0, .18); } }
+  /* The question box stays in view while the answer above it changes, except on screens too
+     short to hold both. The question is also repeated above the chart, so it is never out of sight. */
+  @media (min-height: 620px) { .ask { position: sticky; bottom: 12px; box-shadow: 0 6px 28px rgba(0, 0, 0, .18); } }
+  .asked { text-align: center; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 10px;
+           min-height: 1.45em; overflow-wrap: anywhere; }
+  .asked.none { font-size: 15px; font-weight: 400; color: var(--muted); letter-spacing: 0; padding-top: 5px; }
   .ask { padding: 12px 16px; }
   .ask textarea { min-height: 52px; height: 52px; }
   .askhead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; margin-bottom: 8px; }
@@ -195,6 +199,7 @@
 <main>
   <section>
     <h2>Laya's answer</h2>
+    <p class="asked none" id="asked" aria-live="off"></p>
     <div class="pie">
       <svg viewBox="0 0 200 200" role="img" id="pie" aria-label="No answer yet">
         <circle class="empty" cx="100" cy="100" r="96"></circle>
@@ -356,7 +361,14 @@ async function decide() {
 // Live feedback: one request at a time, and as soon as it returns, another if the text has
 // moved on. While someone types that is a decision every 25 to 40 ms, with no wait for a pause.
 let pending = false, running = false;
+// The question is shown above the chart as it is typed, so question and answer read together.
+function showAsked() {
+  const text = $("question").value.trim();
+  $("asked").textContent = text || "Type a yes-or-no question below";
+  $("asked").classList.toggle("none", !text);
+}
 async function changed() {
+  showAsked();
   pending = true;
   if (running) return;
   running = true;
@@ -370,7 +382,8 @@ for (const example of EXAMPLES) {
   $("examples").append(button);
 }
 $("question").oninput = changed;
-$("clear").onclick = () => { $("question").value = ""; reset(); $("hint").textContent = "Type a yes-or-no question."; $("question").focus(); };
+$("clear").onclick = () => { $("question").value = ""; reset(); showAsked(); $("hint").textContent = "Type a yes-or-no question."; $("question").focus(); };
+showAsked();
 
 const picker = createModelPicker({ mount: $("picker"), onReady: (ready) => {
   if (ready) { reset(); changed(); } else $("hint").textContent = "No model is on the MLA. Load one in the Models tab.";

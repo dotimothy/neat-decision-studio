@@ -236,8 +236,8 @@ The app has four areas:
 
 - **Debate** (`/`, the default): type a yes-or-no question and the model answers it by itself,
   with exactly two options, on every change to the text (a decision every 25-40 ms). A pie
-  chart of the yes and no probabilities follows the typing, with the time on the MLA above it
-  and a trace of how the answer moved. The text is put as `Question: ...` and asked "Is the
+  chart of the yes and no probabilities follows the typing, with the question repeated above
+  it, the time on the MLA and the tokens used below, and a trace of how the answer moved. The text is put as `Question: ...` and asked "Is the
   answer yes or no?"; of eight wordings that one did best, 21 of 24 simple factual questions
   right on the English model. It has nothing to look things up in, so this is what the
   encoder absorbed in pre-training.
