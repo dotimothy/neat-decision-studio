@@ -41,8 +41,14 @@ cmake --build "${APP_DIR}/runtime/build" -j"$(nproc)" | tail -n 1
 ln -sf "${APP_DIR}/runtime/build/laya" "${APP_DIR}/laya"
 
 echo "[3/3] Checking the model in ${MODEL_DIR}"
-[[ -f "${MODEL_DIR}/laya_config.json" ]] || fail "no compiled model in ${MODEL_DIR}.
-  Compile one on the host (bin/laya-compile) and copy it over with bin/laya-deploy."
+if [[ ! -f "${MODEL_DIR}/laya_config.json" ]]; then
+  # No model is not an error: the app's Models page downloads compiled ones from Hugging Face.
+  [[ $check -eq 1 ]] && fail "no compiled model in ${MODEL_DIR} to check with"
+  echo "  none yet. Start the app and download one on its Models page, or compile one on the"
+  echo "  host (bin/laya-compile) and copy it over with bin/laya-deploy."
+  echo "Setup complete. Start the app with: ${APP_DIR}/run.sh"
+  exit 0
+fi
 python3 - "${MODEL_DIR}" <<'PY' || fail "the model directory is incomplete; redeploy it"
 import json, os, sys
 root = sys.argv[1]

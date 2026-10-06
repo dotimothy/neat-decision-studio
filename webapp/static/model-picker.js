@@ -51,7 +51,8 @@ function createModelPicker({ mount, onReady, madeFor }) {
                         make("label", { textContent: "Token budget" }), slider, number, used);
 
   const picker = { name: null, ready: false, models: {}, budget: 0, onBudget: null };
-  const title = (name) => CHECKPOINT_TITLES[picker.models[name]?.checkpoint] || name;
+  const title = (name) => (CHECKPOINT_TITLES[picker.models[name]?.checkpoint] || name)
+    + (picker.models[name]?.precision === "A_BF16_W_INT8" ? ", INT8 weights" : "");
   let touched = false, active = false;
 
   // The budget follows its ceiling until the user sets their own, and never exceeds it.

@@ -8,6 +8,8 @@
 #   ./run.sh --preload NAME      the model to put on the MLA at startup, or "none" (default:
 #                                general). One model is loaded at a time; another is loaded
 #                                in its place from the pages.
+#   ./run.sh --hub REPO          the Hugging Face repository the Models page downloads compiled
+#                                models from, or "none" (default: TDoSiMa/sima-laya)
 #   ./run.sh --no-games          leave the game model out altogether
 #   ./run.sh --stop              stop a running app
 #   ./run.sh --reset-mla         reset the board's MLA runtime first (see below)
@@ -27,6 +29,7 @@ seq_lens="${LAYA_SEQ_LENS:-all}"
 reset=0
 games=1
 preload="${LAYA_PRELOAD:-general}"
+hub="${LAYA_HUB:-TDoSiMa/sima-laya}"
 
 fail() { echo "run.sh: $*" >&2; exit 1; }
 
@@ -45,17 +48,20 @@ while [[ $# -gt 0 ]]; do
     --reset-mla) reset=1; shift ;;
     --no-games) games=0; shift ;;
     --preload) preload="${2:?--preload needs a value}"; shift 2 ;;
+    --hub) hub="${2:?--hub needs a value}"; shift 2 ;;
     --stop)
       # SIGTERM lets the server close the runtimes, which releases the models on the MLA.
       pids="$(pgrep -f 'python3 .*webapp/server[.]py' || true)"
       [[ -n "$pids" ]] && kill -TERM $pids && echo "stopped" || echo "not running"
       exit 0 ;;
-    -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "unknown option: $1 (see --help)" ;;
   esac
 done
 
-[[ -f "${MODEL_DIR}/laya_config.json" ]] || fail "no compiled model in ${MODEL_DIR}; run ./setup.sh"
+# With no compiled model on the board the app still starts: its Models page downloads them.
+[[ -f "${MODEL_DIR}/laya_config.json" ]] \
+  || echo "No compiled model in ${MODEL_DIR} yet: download one on the Models page once the app is up."
 
 mla_sudo() {
   if sudo -n true 2> /dev/null; then sudo -n "$@"; else echo "${MLA_SUDO_PASSWORD}" | sudo -S -p '' "$@"; fi
@@ -87,7 +93,8 @@ fi
 
 address="$(hostname -I 2> /dev/null | awk '{print $1}')"
 echo "Starting; the demo will be at http://${address:-<board-ip>}:${PORT} (models: /models)"
-args=(--model "${MODEL_DIR}" --laya "${APP_DIR}/laya" --port "${PORT}" --preload "${preload}")
+args=(--model "${MODEL_DIR}" --laya "${APP_DIR}/laya" --port "${PORT}" --preload "${preload}" --root "${APP_DIR}"
+      --hub "${hub}")
 [[ -n "${seq_lens}" && "${seq_lens}" != "all" ]] && args+=(--seq-lens "${seq_lens}")
 # Every other model-<name> directory is a question model the page can switch to.
 for dir in "${APP_DIR}"/model-*/; do

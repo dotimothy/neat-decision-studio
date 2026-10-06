@@ -30,7 +30,7 @@
           border: 1px solid transparent; font-size: 14px; }
   nav a:hover { border-color: var(--line); }
   nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
-  main { max-width: 880px; padding: 0 24px 32px; display: grid; gap: 14px; }
+  main { max-width: 1040px; padding: 0 24px 32px; display: grid; gap: 14px; }
   @media (max-width: 700px) { main { padding: 0 16px 24px; } header { padding: 16px 16px 10px; } }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
   h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
@@ -39,6 +39,18 @@
   .bar { height: 10px; background: var(--track); border-radius: 999px; overflow: hidden; margin-top: 8px; }
   .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
   .model { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; align-items: start; }
+  .model .actions { display: flex; flex-direction: column; gap: 8px; }
+  .model.remote { background: color-mix(in srgb, var(--panel) 60%, transparent); border-style: dashed; }
+  .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr); gap: 3px 14px;
+           margin: 10px 0 0; font-size: 13.5px; }
+  .facts dt.wide { grid-column: 1; }
+  .facts dd.wide { grid-column: 2 / -1; }
+  @media (max-width: 760px) { .facts { grid-template-columns: max-content minmax(0, 1fr); } }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; overflow-wrap: anywhere; }
+  .facts a { color: var(--accent); }
+  .graphs.plain { color: var(--ink); }
+  button.danger:hover { border-color: var(--bad); color: var(--bad); }
   .model.wanted { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .model h3 { margin: 0; font-size: 16.5px; }
   .model p { margin: 4px 0 0; color: var(--muted); font-size: 13.5px; }
@@ -56,6 +68,9 @@
   .progress { margin-top: 10px; font-size: 13px; color: var(--muted); }
   .progress .bar { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; margin-bottom: 4px; }
   .progress .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+  .pill.board { color: var(--accent); } .pill.remote { color: var(--muted); } .pill.downloading { color: var(--warn); }
+  .note a { color: var(--accent); }
+  .empty { border: 1px dashed var(--line); border-radius: 12px; padding: 16px; color: var(--muted); }
   .error { color: var(--bad); margin: 0; overflow-wrap: anywhere; }
   .note { color: var(--muted); font-size: 13.5px; margin: 0; }
 </style>
@@ -64,7 +79,7 @@
 <body>
 <header>
   <h1>Models</h1>
-  <p>What is loaded on the Modalix MLA</p>
+  <p>Every model on this board or on Hugging Face: download, load, unload and delete</p>
   <nav><a href="/">Debate</a><a href="/questions">Questions</a><a href="/games">Games</a><a class="here" href="/models">Models</a></nav>
 </header>
 <script src="/static/brand.js"></script>
@@ -79,17 +94,22 @@
   </section>
   <p class="error" id="error" hidden></p>
   <div id="models" style="display:grid; gap:14px"></div>
+  <p class="note" id="hubNote"></p>
   <p class="note">One model is on the MLA at a time: loading a model unloads the one that was there. Loading takes
     3&ndash;10 seconds. Nothing is loaded on its own: the other pages use whichever model is loaded here, and
     wait while there is none.</p>
 </main>
 <script>
+// What is known about a checkpoint without asking Hugging Face, for models compiled locally
+// or when the board is offline: title, description, encoder, languages.
 const CHECKPOINTS = {
-  "laya": ["Laya", "English, ModernBERT-large. The general question model."],
-  "laya-typed-decisions": ["Laya typed-decisions", "English, fine-tuned by upstream on typed-decision workflows."],
-  "laya-multilingual": ["Laya multilingual", "100+ languages, mmBERT-base: smaller and about twice as fast."],
-  "laya-dino": ["Laya-dino", "Decision head fine-tuned for Dino Arena."],
+  "laya": ["Laya", "The general question model.", "ModernBERT-large, 421M parameters", "English"],
+  "laya-typed-decisions": ["Laya typed-decisions", "Fine-tuned by upstream on typed-decision workflows.", "ModernBERT-large, 421M parameters", "English"],
+  "laya-multilingual": ["Laya multilingual", "More than 100 languages, on a smaller encoder that answers about twice as fast.", "mmBERT-base, 322M parameters", "100+ languages"],
+  "laya-dino": ["Laya-dino", "Decision head fine-tuned for Dino Arena.", "ModernBERT-large, 421M parameters", "English (game states)"],
 };
+const PRECISIONS = { "BF16": "bfloat16 weights and activations", "A_BF16_W_INT8": "int8 weights, bfloat16 activations",
+                     "A_BF16_W_INT4": "int4 weights, bfloat16 activations" };
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
   const node = Object.assign(document.createElement(tag), props);
@@ -97,93 +117,191 @@ const el = (tag, props = {}, ...children) => {
   return node;
 };
 const mb = (bytes) => bytes >= 1 << 30 ? (bytes / (1 << 30)).toFixed(2) + " GB" : Math.round(bytes / (1 << 20)) + " MB";
+const left = (s) => s >= 90 ? `about ${Math.round(s / 60)} min left` : `about ${Math.max(1, Math.round(s))} s left`;
 const chosen = {};      // model -> Set of graph sizes ticked for the next load
-let busy = null;        // model being loaded or unloaded by this page
+let busy = null;        // model this page is acting on (load, unload, download, cancel, delete)
+let info = null, hub = null;   // the board's models, and the list on Hugging Face
 
-function render(info) {
+// One card per model, whether it is on this board, on Hugging Face, or both. `local` is what
+// the board says about it and `remote` what Hugging Face lists; either may be missing.
+function card(name, local, remote) {
+  const known = CHECKPOINTS[local?.checkpoint] || [];
+  const int8 = local && !remote && local.precision === "A_BF16_W_INT8";
+  const title = remote?.title || (known[0] || local.checkpoint || name) + (int8 ? " INT8" : "");
+  const about = remote?.about || known[1] || "";
+  const precision = local?.precision || remote?.precision;
+  const downloading = remote?.state === "downloading";
+  const working = busy === name || local?.state === "loading" || local?.state === "unloading";
+
+  // Where it is: on the MLA, on the board's disk, or only on Hugging Face.
+  const pills = [];
+  if (local?.state === "loading" || local?.state === "unloading") pills.push(el("span", { className: "pill loading", textContent: local.state + "…" }));
+  else if (local?.loaded) pills.push(el("span", { className: "pill loaded", textContent: "loaded on the MLA" }));
+  else if (local) pills.push(el("span", { className: "pill board", textContent: "on this board" }));
+  if (downloading) pills.push(el("span", { className: "pill downloading", textContent: "downloading…" }));
+  else if (!local) pills.push(el("span", { className: "pill remote", textContent: "on Hugging Face" }));
+
+  // The graphs: tick boxes for what to load once it is on the board, a plain list before.
+  const speed = Object.fromEntries((remote?.graphs || []).map((g) => [g.seq_len, g.latency_ms]));
+  const graphs = el("div", { className: "graphs" + (local ? "" : " plain") });
+  for (const graph of local ? local.graphs : remote.graphs) {
+    const text = [mb(graph.bytes), speed[graph.seq_len] ? `${speed[graph.seq_len]} ms` : ""].filter(Boolean).join(" · ");
+    if (local) {
+      chosen[name] ??= new Set(local.loaded ? local.loaded_seq_lens : local.seq_lens);
+      const box = el("input", { type: "checkbox", checked: local.loaded ? local.loaded_seq_lens.includes(graph.seq_len) : chosen[name].has(graph.seq_len),
+                                disabled: local.loaded || working });
+      box.onchange = () => { box.checked ? chosen[name].add(graph.seq_len) : chosen[name].delete(graph.seq_len); render(); };
+      graphs.append(el("label", {}, box, `${graph.seq_len} tokens`, el("span", { textContent: text })));
+    } else {
+      graphs.append(el("label", {}, `${graph.seq_len} tokens`, el("span", { textContent: text })));
+    }
+  }
+
+  const facts = el("dl", { className: "facts" });
+  const fact = (label, ...value) => { if (value[0]) facts.append(el("dt", { textContent: label }), el("dd", {}, ...value)); };
+  const wide = (label, ...value) => { if (value[0]) facts.append(el("dt", { className: "wide", textContent: label }), el("dd", { className: "wide" }, ...value)); };
+  fact("Encoder", remote?.card?.encoder || known[2]);
+  fact("Languages", remote?.card?.languages || known[3]);
+  fact("Precision", PRECISIONS[precision] || precision);
+  wide("Accuracy", remote?.agreement ? `same decision as the PyTorch model in ${remote.agreement}` : "");
+  const disk = local ? local.graphs.reduce((sum, g) => sum + g.bytes, 0) + local.fixed_bytes : 0;
+  fact("Size", local ? `${mb(disk)} on this board's disk` : `${mb(remote.bytes)} to download`
+                     + (remote.have_bytes && !downloading ? `, ${mb(remote.have_bytes)} of it already here` : ""));
+  if (local) {
+    const need = local.graphs.filter((g) => chosen[name].has(g.seq_len)).reduce((sum, g) => sum + g.bytes, 0);
+    fact("On the MLA", local.loaded ? `the ${local.loaded_seq_lens.join(", ")}-token graph${local.loaded_seq_lens.length > 1 ? "s" : ""}, ${mb(local.loaded_seq_lens.reduce((sum, s) => sum + local.graphs.find((g) => g.seq_len === s).bytes, 0))}`
+                                    : `the ticked graphs would take ${mb(need)}`);
+  }
+  if (remote && hub.repo) {
+    const upstream = /^[\w.-]+\/[\w.-]+$/.test(remote.card?.upstream || "") ? remote.card.upstream : null;
+    wide("Source", el("a", { href: `${hub.page}/tree/main/${remote.path}`, target: "_blank", rel: "noopener", textContent: `${hub.repo}/${remote.path}` }),
+      ...(upstream ? [", compiled from ", el("a", { href: `https://huggingface.co/${upstream}`, target: "_blank", rel: "noopener", textContent: upstream })] : []),
+      remote.card?.license ? ` (${remote.card.license})` : "");
+  } else {
+    wide("Source", "compiled and copied to this board; not on Hugging Face");
+  }
+
+  // Progress comes from the server: stage boundaries for a load, bytes for a download.
+  let progress = "";
+  if (local?.progress) {
+    const percent = Math.round(local.progress.fraction * 100);
+    const fill = el("i"); fill.style.width = percent + "%";
+    progress = el("div", { className: "progress", role: "progressbar", ariaValueMin: 0, ariaValueMax: 100, ariaValueNow: percent, ariaLabel: `${local.state} ${title}` },
+      el("div", { className: "bar" }, fill),
+      el("span", { textContent: `${local.progress.stage} · step ${local.progress.step} of ${local.progress.steps} · ${percent}%` }));
+  } else if (downloading && remote.progress) {
+    const p = remote.progress, percent = Math.round(p.fraction * 100);
+    const fill = el("i"); fill.style.width = (p.fraction * 100).toFixed(1) + "%";
+    progress = el("div", { className: "progress", role: "progressbar", ariaValueMin: 0, ariaValueMax: 100, ariaValueNow: percent, ariaLabel: `downloading ${title}` },
+      el("div", { className: "bar" }, fill),
+      el("span", { textContent: `${mb(p.done_bytes)} of ${mb(p.total_bytes)} · ${percent}%`
+        + (p.bytes_per_second ? ` · ${(p.bytes_per_second / 1e6).toFixed(1)} MB/s` : "")
+        + (p.seconds_left != null ? ` · ${left(p.seconds_left)}` : "") + ` · ${p.file}` }));
+  }
+  const problem = remote?.error && !downloading && !local ? el("p", { className: "error", textContent: remote.error }) : "";
+
+  const idle = busy === null && !working;
+  const button = (text, action, props = {}) => {
+    const node = el("button", { textContent: text, ...props });
+    node.onclick = action;
+    return node;
+  };
+  const actions = el("div", { className: "actions" });
+  if (local?.loaded) {
+    actions.append(button("Unload", () => act(name, "/api/models/unload"), { disabled: !idle }));
+  } else if (local) {
+    actions.append(button("Load", () => act(name, "/api/models/load", { seq_lens: [...chosen[name]].sort((a, b) => a - b) }),
+                          { className: "primary", disabled: !idle || !chosen[name].size }));
+    actions.append(button("Delete", () => remove(name, title, disk, Boolean(remote)),
+                          { className: "danger", disabled: !idle, title: "Remove this model's files from the board's disk" }));
+  } else if (downloading) {
+    actions.append(button("Cancel", () => act(name, "/api/hub/cancel"), { disabled: busy !== null }));
+  } else {
+    const another = Object.values(hub.models).some((model) => model.state === "downloading");
+    actions.append(button(remote.have_bytes ? "Continue Download" : "Download", () => act(name, "/api/hub/download"),
+                          { className: "primary", disabled: !idle || another }));
+    if (remote.have_bytes) {
+      actions.append(button("Discard", () => act(name, "/api/models/delete"),
+                            { className: "danger", disabled: !idle, title: "Remove the part that was downloaded" }));
+    }
+  }
+  return el("section", { className: "model" + (local ? "" : " remote") + (location.hash === "#" + name ? " wanted" : ""), id: name },
+    el("div", {}, el("h3", {}, title, ...pills), el("p", { textContent: about }), facts, graphs, progress, problem),
+    actions);
+}
+
+function render() {
+  if (!info) return;
   const { mla_loaded_bytes: used, mla_total_bytes: total } = info.memory;
   $("memText").textContent = total ? `${mb(used)} loaded by this app, of ${mb(total)} reserved for the MLA` : `${mb(used)} loaded by this app`;
   $("memBar").style.width = (total ? used / total * 100 : 0).toFixed(1) + "%";
+  const remote = hub?.models || {};
+  // The board's models first, then the ones only Hugging Face has.
+  const names = [...Object.keys(info.models), ...Object.keys(remote).filter((name) => !(name in info.models))];
   const loaded = Object.values(info.models).filter((m) => m.loaded).length;
-  $("memLoaded").textContent = `${loaded} of ${Object.keys(info.models).length} models loaded`;
+  $("memLoaded").textContent = `${loaded} loaded · ${Object.keys(info.models).length} on this board`
+    + (names.length > Object.keys(info.models).length ? ` · ${names.length - Object.keys(info.models).length} more on Hugging Face` : "");
 
   const root = $("models");
-  root.replaceChildren();
-  for (const [name, model] of Object.entries(info.models)) {
-    const [title, about] = CHECKPOINTS[model.checkpoint] || [model.checkpoint || name, ""];
-    const working = busy === name || model.state === "loading" || model.state === "unloading";
-    chosen[name] ??= new Set(model.loaded ? model.loaded_seq_lens : model.seq_lens);
-    const graphs = el("div", { className: "graphs" });
-    for (const graph of model.graphs) {
-      const box = el("input", { type: "checkbox", checked: model.loaded ? model.loaded_seq_lens.includes(graph.seq_len)
-                                                                         : chosen[name].has(graph.seq_len),
-                                disabled: model.loaded || working });
-      box.onchange = () => { box.checked ? chosen[name].add(graph.seq_len) : chosen[name].delete(graph.seq_len); render(info); };
-      graphs.append(el("label", {}, box, `${graph.seq_len} tokens`, el("span", { textContent: mb(graph.bytes) })));
-    }
-    const need = model.graphs.filter((g) => chosen[name].has(g.seq_len)).reduce((sum, g) => sum + g.bytes, 0) + model.fixed_bytes;
-    const state = model.state === "loading" || model.state === "unloading" ? model.state : working ? (model.loaded ? "unloading" : "loading") : model.state;
-    const pill = el("span", { className: "pill " + (working ? "loading" : model.state),
-                              textContent: working ? state + "…" : model.loaded ? "loaded" : "not loaded" });
-    // Progress comes from the server: real stage boundaries, timed inside a stage.
-    let progress = "";
-    if (model.progress) {
-      const percent = Math.round(model.progress.fraction * 100);
-      const fill = el("i"); fill.style.width = percent + "%";
-      progress = el("div", { className: "progress", role: "progressbar", ariaValueMin: 0, ariaValueMax: 100, ariaValueNow: percent,
-                             ariaLabel: `${state} ${title}` },
-        el("div", { className: "bar" }, fill),
-        el("span", { textContent: `${model.progress.stage} · step ${model.progress.step} of ${model.progress.steps} · ${percent}%` }));
-    }
-    const button = el("button", { textContent: model.loaded ? "Unload" : "Load", disabled: working || busy !== null
-                                    || (!model.loaded && !chosen[name].size) });
-    if (!model.loaded) button.className = "primary";
-    button.onclick = () => act(name, model.loaded ? "unload" : "load");
-    const detail = model.loaded ? `On the MLA: ${model.loaded_seq_lens.join(", ")}-token graph${model.loaded_seq_lens.length > 1 ? "s" : ""}.`
-                                : `Loading the ticked graphs needs about ${mb(need)}.`;
-    root.append(el("section", { className: "model" + (location.hash === "#" + name ? " wanted" : ""), id: name },
-      el("div", {}, el("h3", {}, title, pill), el("p", { textContent: about + " " + detail }), graphs, progress),
-      button));
+  root.replaceChildren(...names.map((name) => card(name, info.models[name], remote[name])));
+  if (!names.length) {
+    root.append(el("div", { className: "empty", textContent: hub && !hub.listed && !hub.error
+      ? "No model is on this board yet. Reading the list from Hugging Face…" : "No model is on this board yet." }));
+  }
+  const note = $("hubNote");
+  note.replaceChildren();
+  if (hub?.repo) {
+    note.append("Models are downloaded from ", el("a", { href: hub.page, target: "_blank", rel: "noopener", textContent: hub.repo }),
+      ` on Hugging Face onto this board's disk, which has ${mb(hub.free_bytes)} free. `,
+      hub.error ? el("span", { className: "error", textContent: hub.error }) : "");
   }
 }
 
-// Poll gently when nothing is happening and often while a model is loading or unloading, from
-// this page or any other, so the progress bar moves.
+// Poll gently when nothing is happening and often while a model is loading, unloading or
+// downloading, from this page or any other, so the progress bars move.
 async function refresh() {
   let active = busy !== null;
   try {
-    const info = await (await fetch("/api/info")).json();
-    render(info);
-    active ||= Object.values(info.models).some((model) => model.progress);
+    [info, hub] = await Promise.all([fetch("/api/info").then((r) => r.json()), fetch("/api/hub").then((r) => r.json())]);
+    render();
+    active ||= Object.values(info.models).some((model) => model.progress) || !hub.listed
+      || Object.values(hub.models).some((model) => model.state === "downloading");
   } catch (_) { /* board unreachable: keep the last view */ }
-  setTimeout(refresh, active ? 150 : 2000);
+  setTimeout(refresh, active ? 250 : 2500);
 }
 
 // The poll may be in its slow phase when a button is pressed: follow the action until it returns.
 async function refreshSoon() {
   while (busy !== null) {
-    try { render(await (await fetch("/api/info")).json()); } catch (_) { /* next try */ }
+    try { info = await (await fetch("/api/info")).json(); render(); } catch (_) { /* next try */ }
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
 }
 
-async function act(name, action) {
+async function act(name, path, extra = {}) {
   busy = name;
   $("error").hidden = true;
   refreshSoon();
   let body;
   try {
-    const request = { model: name };
-    if (action === "load") request.seq_lens = [...chosen[name]].sort((a, b) => a - b);
-    const response = await fetch("/api/models/" + action, { method: "POST", headers: { "Content-Type": "application/json" },
-                                                            body: JSON.stringify(request) });
+    const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify({ model: name, ...extra }) });
     body = await response.json();
   } catch (error) {
     body = { error: "The board did not answer: " + error.message };
   }
   busy = null;
-  if (body.error) { $("error").hidden = false; $("error").textContent = body.error; return; }
-  render(body);
+  if (body.error) { $("error").hidden = false; $("error").textContent = body.error; $("error").scrollIntoView({ block: "center" }); }
+  // Either endpoint family answers with its own half of the picture; fetch both again.
+  try { [info, hub] = await Promise.all([fetch("/api/info").then((r) => r.json()), fetch("/api/hub").then((r) => r.json())]); } catch (_) { /* the poll will */ }
+  render();
+}
+
+// Deleting removes files from the board, so it is asked about first.
+function remove(name, title, bytes, downloadable) {
+  const again = downloadable ? "It can be downloaded again from Hugging Face."
+                             : "It is not on Hugging Face: getting it back means compiling or copying it again.";
+  if (confirm(`Delete ${title} from this board's disk (${mb(bytes)})?\n\n${again}`)) act(name, "/api/models/delete");
 }
 
 refresh();

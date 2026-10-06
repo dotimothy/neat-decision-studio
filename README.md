@@ -5,6 +5,11 @@ decision models: a ModernBERT-style encoder with a small decision head. A model 
 (text or JSON) and a typed question (`choice`, `score` or `noul`) and returns a probability
 for each option in one forward pass, with no text generation.
 
+![Debate: a yes-or-no question answered as it is typed, in about 19 ms per decision](docs/debate.gif)
+
+*The demo's landing page, recorded on a Modalix DevKit in real time: the model answers again
+on every keystroke, 19 ms on the MLA each time.*
+
 This repository compiles those models for the SiMa.ai Modalix MLA and runs them there:
 
 - **`laya_sima/`** builds a checkpoint as one MLA graph on the LLiMa compiler framework
@@ -12,11 +17,48 @@ This repository compiles those models for the SiMa.ai Modalix MLA and runs them 
   towers use) and drives the same passes `llima-compile` does.
 - **`runtime/`** is a standalone C++ runtime for the board. It uses only the LLiMa runtime
   library (`sima-lmm-dev`: MLA buffers, ELF loading, tokenizer).
-- **`webapp/`** is an example web application on top of the runtime: a question page, a games
-  page where a specialized model plays a dino runner in real time, and a model manager.
+- **`webapp/`** is an example web application on top of the runtime: live yes-or-no answers, a
+  page for your own questions, four games the models play in real time, and a model manager.
 
-Compiled artifacts and checkpoints are not in the repository; the Build section regenerates
-them.
+Checkpoints and compiled artifacts are not in the repository. The compiled models are on
+Hugging Face at [TDoSiMa/sima-laya](https://huggingface.co/TDoSiMa/sima-laya), where the app
+downloads them from, and the Build section regenerates them.
+
+## The demo
+
+Everything below was recorded from the web app running on a Modalix DevKit, at the speed it
+runs. Each page shows the time the MLA took for the decisions on screen.
+
+**Questions.** A state, and any number of typed questions about it with your own options; each
+question is one forward pass.
+
+![The Questions page with a support ticket and three questions answered](docs/questions.png)
+
+**Games.** In each game the model makes every decision, and the page shows what it was told
+and how it chose.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/dino.gif" alt="Dino Arena"><br>
+<b>Dino Arena.</b> A decision head fine-tuned for the game picks run, jump or duck about 45
+times a second.</td>
+<td width="50%"><img src="docs/blackjack.gif" alt="Blackjack"><br>
+<b>Blackjack.</b> The general model bets, doubles, hits and stands, remembering the cards it
+has seen.</td>
+</tr>
+<tr>
+<td><img src="docs/snake.gif" alt="Snake"><br>
+<b>Snake.</b> One decision per move, among three moves described by where each leads. The grid
+and how far the snake sees can be changed.</td>
+<td><img src="docs/sudoku.gif" alt="Sudoku"><br>
+<b>Sudoku.</b> Two decisions per cell: which cell is safe to fill, then which digit.</td>
+</tr>
+</table>
+
+**Models.** One card per model, on the board or on Hugging Face: download it, load it on the
+MLA, unload it, delete it. One model is on the MLA at a time.
+
+<img src="docs/models.png" alt="The model manager: one card per model, one of them downloading" width="760">
 
 ## Results
 
@@ -86,8 +128,10 @@ webapp/               example web app (stdlib Python server; question, games and
   static/brand/, fonts/ marks and fonts taken from SiMa.ai's NEAT GenAI Studio example
 games/                per game: what the model is asked and why, and the reference policy
 setup.sh, run.sh      board-side: build once, start the app
+docs/                 the recordings of the demo shown above
 tools/                reference dump, ONNX check, board parity, agreement, I/O shape probe,
-                      game-head training, and per game a board check and a simulation
+                      game-head training, and per game a board check and a simulation,
+                      and publish_hub.py, which uploads compiled models to Hugging Face
 ```
 
 `models/`, `build/`, `.venv-ref/`, `.venv-train/` and `third_party/` are local and ignored by
@@ -150,6 +194,30 @@ packing all attention heads into one tensor, which the RoPE step here assumes.
 `build/laya/sima_files/devkit/` is what gets deployed: the ELFs, `tokenizer.json`, the token
 embedding table as bfloat16, the act-head tail and `laya_config.json`.
 
+## Compiled models on Hugging Face
+
+The models compiled here are published at https://huggingface.co/TDoSiMa/sima-laya, so a
+board does not need a host with the compiler to run them: `general`, `general-int8` (the
+int8-weights build at 128 tokens), `typed-decisions`, `multilingual` and `dino`, 11.9 GB in
+all. The app's Models page lists them next to the models already on the board, downloads one
+onto the board and offers it for loading, and can delete it again; nothing but the runtime
+has to be on the board first, so the steps are to copy
+`runtime/`, `webapp/`, `setup.sh` and `run.sh` there, run `./setup.sh` and `./run.sh`, and
+download a model on the Models page.
+
+The repository's `models.json` lists each model's files with sizes and SHA-256 sums, and what
+its card says (title, description, encoder, languages, latency per graph, agreement). The
+server (`Hub` in `webapp/server.py`) reads it, fetches the files over HTTPS with the standard
+library, checks every file against its sum, and writes them to `model` (for `general`) or
+`model-<name>` in the app directory, where `run.sh` finds them at the next start too. A
+cancelled or interrupted download keeps the files that had arrived and continues from there.
+Downloaded data is dropped from the page cache as it is written, because page cache in the
+CMA pool is what makes a model load fail (see below). `./run.sh --hub REPO` points the app at
+another repository, `--hub none` turns the feature off.
+
+`tools/publish_hub.py --repo NAME` uploads the builds under `build/` and writes `models.json`
+and the model card; it needs `huggingface_hub` and a login with write access.
+
 ## Run on the board
 
 ```bash
@@ -177,10 +245,14 @@ The app has four areas:
   see the decision and its latency. It opens blank; examples are one click away, and scenarios
   can be saved in the browser.
 - **Games** (`/games`): Dino Arena, Blackjack, Snake and Sudoku, below.
-- **Models** (`/models`): the model manager. It shows what is on the MLA and has Load and
-  Unload per model, with a choice of which graphs to load, and a progress bar while a model
-  loads or unloads. The bar's stages are real (the runtime logs when it starts and finishes
-  each graph); inside a stage it is the time spent against a measured estimate.
+- **Models** (`/models`): the model manager. It has one card per model, whether the model is
+  on the board, on Hugging Face or both, with its encoder, languages, precision, agreement
+  with PyTorch, size, source, and each graph's size and latency. A model on the board has
+  Load or Unload, with a choice of which graphs to load, and Delete, which removes its files
+  from the board's disk after asking (a loaded model has to be unloaded first). A model that
+  is only on Hugging Face has Download, with Cancel while it runs. Loading shows a progress
+  bar whose stages are real (the runtime logs when it starts and finishes each graph); inside
+  a stage it is the time spent against a measured estimate. A download's bar counts bytes.
 
 One model is on the MLA at a time, and choosing and loading it happens only in the model
 manager: loading a model there unloads the one that was loaded. Every other page just names
