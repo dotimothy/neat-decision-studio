@@ -394,7 +394,7 @@ embedding table as bfloat16, the act-head tail and `laya_config.json`.
 The models compiled here are published at https://huggingface.co/TDoSiMa/sima-laya, so a
 board does not need a host with the compiler to run them: `general`, `general-int8` (the
 int8-weights build at 128 tokens), `typed-decisions`, `multilingual` and `dino`, 11.9 GB in
-all. The app's Settings lists them next to the models already on the board, downloads one
+all, and `clm`, CLM with its 128-token chain, another 8.5 GB. The app's Settings lists them next to the models already on the board, downloads one
 onto the board and offers it for loading, and can delete it again; nothing but the runtime
 has to be on the board first (see [Install](#install)).
 
@@ -409,7 +409,10 @@ CMA pool is what makes a model load fail (see below). `./run.sh --hub REPO` poin
 another repository, `--hub none` turns the feature off.
 
 `tools/publish_hub.py --repo NAME` uploads the builds under `build/` and writes `models.json`
-and the model card; it needs `huggingface_hub` and a login with write access.
+and the model card; it needs `huggingface_hub` and a login with write access. A model that
+is not uploaded in a run keeps the entry it has. CLM is listed apart, under `models_v2`: a
+copy of the app from before CLM reads `models` alone and is not troubled by an entry it
+would not understand.
 
 ## Run on the board
 
@@ -544,11 +547,13 @@ applications' included. It never runs unless asked for, and there are three ways
 - `./run.sh --reset-mla`, which resets and then starts the app.
 
 The first two unload this app's own model cleanly, reset, and leave the MLA empty: load a
-model again afterwards. Because a reset reaches other applications, the button is not open to
-anyone who can reach the port. A browser on the board itself may reset freely; one on another
-machine is asked for the reset token, which the app makes the first time it starts, keeps in
-`.reset-token` (readable only by the user it runs as), prints in its log, and
-`./run.sh --reset-token` shows. In the API it is `POST /api/mla/reset` with `{"token"}`.
+model again afterwards. By default anybody who can reach the app may reset. A reset reaches
+other applications, so on a board that is shared the app can be started to ask first:
+`./run.sh --require-reset-token` (or `RESET_TOKEN_REQUIRED=1`). A browser on the board
+itself may then still reset freely, and one on another machine is asked for the reset token,
+which the app makes when it starts, keeps in `.reset-token` (readable only by the user it
+runs as), prints in its log, and `./run.sh --reset-token` shows. In the API it is `POST
+/api/mla/reset`, with `{"token"}` where one is asked for.
 The reset needs root: `sudo` without a password if the board allows it, otherwise with
 `MLA_SUDO_PASSWORD` (the DevKit image's stock password by default).
 
@@ -670,17 +675,42 @@ is no generation: Qwen3-8B is used as an encoder twenty times Laya's size.
 time, with a key-value cache between the parts of a layer, and they end in the vocabulary
 head. An embedding needs neither, so `clm_sima` builds the decoder the way `laya_sima`
 builds Laya, every position through whole layers at once: RMS norms, grouped-query attention
-with normed and rotated queries and keys, the SwiGLU MLP. Attention is causal, so the mask
-is a constant of the graph and a short text is simply padded on the right. 36 layers do not
-go to the MLA as one graph; they are cut into 18 graphs of two layers that hand one buffer
-along. Weights are int8 (7.25 GB on the MLA; in bfloat16 they would be 15 GB of its 16),
-activations bfloat16.
+with normed and rotated queries and keys, the SwiGLU MLP. 36 layers do not go to the MLA as
+one graph; they are cut into 18 graphs of two layers that hand one buffer along. Weights are
+int8 (7.25 GB on the MLA; in bfloat16 they would be 15 GB of its 16), activations bfloat16.
+
+**One pass for a whole question.** A pass through the 18 graphs costs the same however
+little of it is used (254 ms for 128 positions, whether the text has 5 tokens or 120), and a
+question needs several texts embedded: its state and each of its options. So the attention
+mask is an input of every graph, and the texts are laid end to end in one pass, each seeing
+only itself. That is exact, not an approximation: attention is causal, and Qwen3 knows a
+token's place only through RoPE, which makes a query and a key's product depend on how far
+apart they are and nothing else. `tools/clm_verify_onnx.py` checks it: three texts in one
+pass come out as each does alone, to 4e-6. A new yes-or-no question is then one pass where
+it was three, and a score of ten levels one where it was eleven.
+
+A chain can also be compiled for fewer positions (`--seq_lens 32,128`). Each length is the
+whole encoder again, another 7.25 GB on the MLA: the compiler's switch for keeping weights
+apart from code (`enable_filter_sharing`, which LLiMa uses between the graphs of one layer)
+did not take them out of these graphs. So it is a choice made when loading, like a Laya's
+graphs: the 128-token chain alone is the default; with the 32-token chain loaded as well a
+pass that fits it runs there, and the runtime plans which texts share which pass by what a
+pass on each chain measured at warm-up. On the board the short chain turned out to buy
+little (below).
+
+On the board, packing is not bit-exact as it is in fp32: the same text in another place
+in the pass comes out with a cosine of about 0.995 to itself. That is the size of the
+board's distance from PyTorch in the first place (the int8 weights, and RoPE's tables in
+bfloat16), and packed embeddings are on average no further from PyTorch than unpacked
+ones. A text of a single token is the exception both ways: it comes out identically
+wherever it sits, and far from PyTorch (0.65), so what is wrong there is how the graphs
+treat the first token of a text, which is not understood yet.
 
 ```bash
 hf download Qwen/Qwen3-8B --local-dir models/Qwen3-8B
 hf download Contrastive-LM/CLM-v0.1-8B --local-dir models/CLM-v0.1-8B
 .venv-ref/bin/python tools/clm_heads.py models/CLM-v0.1-8B/CLM_v0.1-8B.pt build/clm_heads
-bin/clm-compile models/Qwen3-8B -o build/clm --seq_len 128 --layers_per_graph 2 --heads build/clm_heads
+bin/clm-compile models/Qwen3-8B -o build/clm --seq_lens 32,128 --layers_per_graph 2 --heads build/clm_heads
 bin/laya-deploy --extra clm=build/clm --board sima@<board-ip>
 ```
 
@@ -690,22 +720,33 @@ graphs (`error code -11`), more often with many running at once or with four lay
 graph; running that graph again has always passed.
 
 **On the board.** The runtime (`runtime/src/clm.cpp`) tokenizes, looks the embeddings up,
-runs the 18 graphs, reads the last token's row, and does the heads and upstream's layout of
-a question (`clm/schema.py`) on the CPU. `laya run`, `bench` and `serve` work on a CLM
-directory as they do on a Laya one, so the app serves it like any other model: it is a card
-in Settings, and the pages ask it the questions they ask Laya. Projections are kept,
-so an option that has been seen costs nothing the second time.
+writes the mask, runs the 18 graphs, reads each text's last token's row, and does the heads
+and upstream's layout of a question (`clm/schema.py`) on the CPU. `laya run`, `bench` and
+`serve` work on a CLM directory as they do on a Laya one, so the app serves it like any
+other model: it is a card in Settings, and the pages ask it the questions they ask Laya.
+What has been embedded is kept, so a text that has been seen costs nothing the second time.
+`laya bench model-clm --texts 3 --tokens 10` times a pass, and `laya hidden --packed 1`
+against `--packed 0` shows on the board that packing changes nothing.
+
+The runtime can be built without a board: `tools/clm_mock/` has stand-ins for the
+accelerator, a graph and the tokenizer, enough to run everything of the runtime that is not
+the MLA (there, packed and separate passes give identical numbers).
 
 **What has been measured.**
 
 | | |
 |---|---|
 | The graph builder against transformers, on small random Qwen3 models (`tools/clm_verify_onnx.py`) | largest difference 4e-6 |
-| The encoder on the MLA, 128 tokens, all 18 graphs | 254 ms a text (13.9 ms a graph); loading takes about 17 s |
-| A yes-or-no question nobody has asked before | about 0.8 s: three texts, the question and its two answers; asked again, nothing |
+| The real graphs in fp32, 46 reference texts laid end to end in 5 passes (`clm_verify_onnx.py real`) | worst cosine with transformers, each alone: 0.999998 |
+| A pass on the MLA, 128 positions, all 18 graphs | 254 ms, whether it holds one text or eight; loading takes about 17 s |
+| A pass on the 32-position chain | 138 ms: not a quarter of the time but over half, for another 7.25 GB |
+| A yes-or-no question nobody has asked before | 0.29 s: its three texts in one pass (0.8 s before packing); asked again, 3 ms |
+| A new score of ten levels | 0.68 s: eleven texts in two passes (about 2.8 s before packing) |
+| Packed against a pass a text, on the board | cosine 0.995 on average, 0.975 at worst: as far apart as either is from PyTorch, and no further from it |
 | The board's embedding against PyTorch (fp32), 46 reference texts | cosine 0.98 to 0.997 for texts of two tokens or more; **0.65 for one-token texts** |
 | The same after 2, 6, 12, 24 and 36 layers | 0.998, 0.994, 0.988, 0.991, 0.989: the error is made early and then holds |
-| Reference answers (`tools/clm_check.py`) | 10 of 13 decisions the same as PyTorch; probabilities move by up to 0.8 |
+| The first two layers in each weight format the compiler has (`--weights`): time, size, cosine with PyTorch | int8 a channel (what is used): 14.0 ms, 420 MB, 0.998 · int4 in blocks (LLiMa's 4-bit): 22.4 ms, 511 MB, 0.993 · int8 in blocks: 43.0 ms, 722 MB, 0.998 · bfloat16: 33.8 ms, 840 MB, 0.99999 |
+| Reference answers (`tools/clm_check.py`) | 9 of 13 decisions the same as PyTorch packed, 10 of 13 with a pass a text; probabilities move by up to 0.8 |
 
 `tools/clm_check.py` makes the comparison against `tools/clm_reference.py`'s PyTorch dump,
 which reproduces the model card's own example (0.993 for the Moon as the cause of tides).
@@ -719,14 +760,22 @@ close call, and an option that is a single token ("Minor", "yes") is embedded wo
 bfloat16 is not the way out as it stands: 15 GB of the MLA's 16, 16.9 ms a layer instead of
 7.3, and a two-layer bfloat16 graph is too large for the compiler's simulation step. Keeping
 only the first layers in bfloat16, where the error is made, is the experiment that follows
-from the depth figures, and has not been run.
+from the depth figures, and has not been run. Fewer bits are not the way either. LLiMa
+compiles its own Qwen models from GPTQ checkpoints into the compiler's 4-bit format, a
+scale a block of input channels, and Qwen3-8B has such checkpoints (for one,
+`RedHatAI/Qwen3-8B-quantized.w4a16`). But that format, tried here with plain rounding,
+is larger and slower on the MLA than the 8-bit one in use, whatever the weights in it:
+GPTQ could only make its 0.993 better, at 1.6 times the time. Of the four formats the
+8-bit one in use is the smallest and the fastest.
 
 Loading it needs 7.25 GB of the MLA's memory free at once. On a board other applications
 use that can mean resetting the accelerator first; Settings refuses the load and
 says what is free rather than letting it fail halfway.
 
-**What to expect of it.** A decision costs one pass of the encoder for the state and one
-for each option not seen before: about 0.25 s each, against Laya's 19 ms for everything.
+**What to expect of it.** A decision costs one pass of the encoder for whatever of its
+texts have not been seen before, about 0.29 s for a new yes-or-no question, against Laya's
+19 ms. The shorter chain is not worth its memory: most of a pass is moving 7 GB of weights,
+which does not shrink with the positions, so 32 positions cost 138 ms where 128 cost 254.
 The Debate page and the terminal ask it a bare yes-or-no question, as its heads were
 trained, and not the form that was tuned for Laya. And the released checkpoint is general
 and zero-shot. In PyTorch it is sure about a
