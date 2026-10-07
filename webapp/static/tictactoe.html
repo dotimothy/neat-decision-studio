@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f4b; --warn: #b45309; --bad: #c0362c;
+    --track: #e8ebf1; --chip: #eef2f8; --field: #ffffff; --sky: #f9fafc; --you: #b45309;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebf0; --muted: #98a2b3; --line: #2a303a;
+      --accent: #5b9dff; --accent-ink: #0b1220; --good: #4cc38a; --warn: #f0a84b; --bad: #f47067;
+      --track: #232934; --chip: #1f252e; --field: #11151a; --sky: #12161b; --you: #f0a84b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 18px 24px 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid transparent; font-size: 14px; }
+  nav a:hover { border-color: var(--line); }
+  nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
+  main { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 16px;
+         padding: 0 24px 32px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 0 16px 24px; }
+                              header { padding: 16px 16px 10px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .controls { margin-top: 12px; justify-content: space-between; }
+  .hint { color: var(--muted); font-size: 13.5px; }
+  kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+        padding: 1px 6px; background: var(--chip); color: var(--ink); }
+  button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--chip); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-variant-numeric: tabular-nums; font-size: 16px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero .value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .hero .unit { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+        font: 12.5px/1.4 var(--mono); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bar { display: grid; grid-template-columns: 48px minmax(0, 1fr) 52px; gap: 8px; align-items: center;
+         margin-top: 6px; font-size: 13.5px; }
+  .bar .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .bar.top .track i { opacity: 1; }
+  .bar.top .name { font-weight: 650; }
+  .bar .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .block { margin-top: 16px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px; }
+  .slider-head { display: flex; justify-content: space-between; font-size: 13.5px; }
+  .slider-head b { font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .error { color: var(--bad); margin-top: 10px; overflow-wrap: anywhere; }
+  .gamebar { display: flex; gap: 6px; align-items: center; padding: 0 24px 12px; color: var(--muted); font-size: 14px; }
+  .gamebar a { color: var(--muted); text-decoration: none; padding: 3px 12px; border-radius: 8px; border: 1px solid var(--line); }
+  .gamebar a.here { color: var(--ink); background: var(--chip); border-color: var(--accent); }
+  @media (max-width: 900px) { .gamebar { padding: 0 16px 10px; } }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+  select { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 8px; }
+  .boardhead { justify-content: space-between; margin-bottom: 10px; }
+  .boardhead h2 { margin: 0; }
+  .boardhead label { color: var(--muted); font-size: 13.5px; }
+  .seats { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  #boardwrap { display: flex; justify-content: center; }
+  .status { min-height: 24px; font-weight: 600; }
+  .status.over { color: var(--accent); }
+  .option { display: grid; grid-template-columns: 96px minmax(0, 1fr) 52px; gap: 2px 8px; align-items: center; margin-top: 6px; font-size: 13.5px; }
+  .option .what { color: var(--muted); }
+  .option.top .name { font-weight: 650; }
+  .option .track { grid-column: 2; height: 6px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .option .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .option.top .track i { opacity: 1; }
+  .option .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .option.bad .what { color: var(--bad); }
+  .asked { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+  .ttt { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 8px; width: min(100%, 420px, 56vh); aspect-ratio: 1; }
+  .ttt button { min-width: 0; padding: 0; border-radius: 14px; background: var(--sky); border: 1px solid var(--line);
+                font: 700 clamp(48px, 11vh, 92px)/1 system-ui, sans-serif; color: var(--ink); cursor: default; }
+  .ttt button.open { cursor: pointer; }
+  .ttt button.open:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--sky)); }
+  .ttt button.x { color: var(--accent); } .ttt button.o { color: var(--warn); }
+  .ttt button.line { background: color-mix(in srgb, var(--good) 22%, var(--sky)); border-color: var(--good); }
+  .ttt button.fresh { animation: pop .3s ease-out; }
+  @keyframes pop { from { transform: scale(.7); } to { transform: scale(1); } }
+</style>
+<link rel="stylesheet" href="/static/neat.css">
+</head>
+<body>
+<header>
+  <h1>Tic-Tac-Toe</h1>
+  <p id="tagline">Play Laya, watch two of it, or set it against a language model: each of its moves is one decision on the Modalix MLA</p>
+  <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a class="here" href="/games">Games</a></nav>
+</header>
+<script src="/static/brand.js"></script>
+<div class="gamebar">Games <div id="picker"></div></div>
+<main>
+  <section>
+    <div class="row boardhead">
+      <h2>Board</h2>
+      <span class="seats">
+        <label for="seatX">X</label><select id="seatX" aria-label="Who plays X"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option></select>
+        <label for="seatO">O</label><select id="seatO" aria-label="Who plays O"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option></select>
+        <label for="deep">Laya Looks</label>
+        <select id="deep" aria-label="How far Laya looks"><option value="1">To the End of the Game</option><option value="0">One Move Ahead</option></select>
+      </span>
+    </div>
+    <div id="boardwrap"><div class="ttt" id="board" role="grid" aria-label="Tic-Tac-Toe board"></div></div>
+    <div class="row controls">
+      <span class="status" id="status">&nbsp;</span>
+      <span class="row">
+        <select id="speed" aria-label="Speed" hidden>
+          <option value="fast">As Fast As It Decides</option>
+          <option value="watch">Watch Speed</option>
+        </select>
+        <button id="restart">New Game</button><button id="auto">Pause</button>
+      </span>
+    </div>
+    <div class="scores">
+      <div class="stat"><b id="winsX">0</b><span>X wins</span></div>
+      <div class="stat"><b id="draws">0</b><span>draws</span></div>
+      <div class="stat"><b id="winsO">0</b><span>O wins</span></div>
+      <div class="stat"><b id="games">0</b><span>games played</span></div>
+    </div>
+    <div class="row controls"><span class="hint">X moves first. Scores are kept until reset, and start over when the players change.</span><button class="small" id="resetScores">Reset Scores</button></div>
+    <p class="note" id="deepNote"></p>
+    <div class="error" id="error" hidden></div>
+  </section>
+
+  <section>
+    <h2>Laya's decisions</h2>
+    <div class="hero"><span class="value" id="mlaMs">&ndash;</span><span class="unit">ms on the MLA per decision</span></div>
+    <div class="stats">
+      <div class="stat"><b id="count">0</b><span>decisions made</span></div>
+      <div class="stat"><b id="matched">&ndash;</b><span>took a best-described square</span></div>
+      <div class="stat"><b id="rate">&ndash;</b><span>decisions per second</span></div>
+      <div class="stat"><b id="gameRate">&ndash;</b><span>games per second</span></div>
+      <div class="stat"><b id="tokens">&ndash;</b><span>tokens in the question</span></div>
+      <div class="stat"><b id="trip">&ndash;</b><span>browser round trip</span></div>
+    </div>
+    <div class="block">
+      <h2>What it is told</h2>
+      <pre id="sees">&ndash;</pre>
+      <p class="note">The model is not shown the grid. The harness works out what taking each empty square does and says it in a
+        word or two; those descriptions are the options of the question.</p>
+    </div>
+    <div class="block">
+      <h2>Which square it takes</h2>
+      <div id="options"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/tictactoe-core.js"></script>
+<script src="/static/model-picker.js"></script>
+<script src="/static/llm-player.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const DEEP_NOTES = {
+  1: "Looking to the end of the game, the harness knows which squares win, hold the draw or lose with best play. A player that takes its best-described square then never loses; the model does so about 98 times in 100.",
+  0: "Looking one move ahead, the harness sees a win to take, a loss to block and two in a row, and nothing else. Laya then walks into a fork: set up two ways to win at once and it can only block one.",
+};
+
+let board = Array(9).fill(null), turn = "X", round = 0, fresh = -1;
+let seats = { X: "you", O: "laya" };
+let auto = true, busy = false, counted = false;
+let record = { X: 0, O: 0, draw: 0 }, stats = { decisions: 0, matched: 0 };
+const recent = [];
+try { Object.assign(seats, JSON.parse(localStorage.getItem("laya.ttt.seats")) || {}); } catch (_) { /* defaults */ }
+
+class NotLoaded extends Error {}
+
+// Laya's move: one question whose options are the empty squares, described.
+async function decide() {
+  const asked = tttQuestion(board, turn, $("deep").value === "1"), sent = performance.now();
+  const response = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: mover(), max_len: picker.budgetFor(mover()), state: TTT_STATE, questions: { q: asked.question } }) });
+  const body = await response.json();
+  if (body.not_loaded) throw new NotLoaded(body.error);
+  if (body.error) throw new Error(body.error);
+  picker.report(body.usage);
+  $("tokens").textContent = body.usage.tokens;
+  const answer = body.answers.q;
+  recent.push({ at: performance.now(), mla: body.usage.mla_ms, trip: performance.now() - sent });
+  while (recent.length > 60) recent.shift();
+  stats.decisions++;
+  if (asked.outcomes[answer.choice] === Math.min(...Object.values(asked.outcomes))) stats.matched++;
+  $("sees").textContent = `${TTT_STATE}\n${TTT_INSTRUCTIONS}`;
+  $("options").replaceChildren(...Object.keys(asked.outcomes).map((square) => {
+    const row = document.createElement("div"), level = asked.outcomes[square], p = answer.probabilities[square];
+    row.className = "option" + (square === answer.choice ? " top" : "") + (level === TTT_MISTAKE ? " bad" : "");
+    row.innerHTML = '<span class="name"></span><span class="what"></span><span class="pct"></span><span class="track"><i></i></span>';
+    row.querySelector(".name").textContent = square;
+    row.querySelector(".what").textContent = TTT_OUTCOMES[level];
+    row.querySelector("i").style.width = (p * 100).toFixed(1) + "%";
+    row.querySelector(".pct").textContent = (p * 100).toFixed(1) + "%";
+    return row;
+  }));
+  return TTT_SQUARES.indexOf(answer.choice);
+}
+
+// A language model's move: it is shown the board in words and asked for a square by name.
+async function llmMove() {
+  const empty = tttEmpty(board).map((i) => TTT_SQUARES[i]);
+  const rows = [0, 1, 2].map((r) => [0, 1, 2].map((c) => `${TTT_SQUARES[r * 3 + c]}: ${board[r * 3 + c] || "empty"}`).join(" | ")).join("\n");
+  const reply = await llm.ask(`You are playing tic-tac-toe as ${turn}. Three in a row wins. Answer with only the name of the empty square you take.`,
+    `The board:\n${rows}\nEmpty squares: ${empty.join(", ")}.\nWhich square do you take as ${turn}?`);
+  const named = reply.text.toLowerCase().replace(/center/g, "centre").match(/top-left|top-right|bottom-left|bottom-right|top|bottom|left|right|centre/g) || [];
+  const said = named.find((name) => empty.includes(name));
+  const square = said || empty[Math.floor(Math.random() * empty.length)];
+  llm.played(reply, square, Boolean(said));
+  return TTT_SQUARES.indexOf(square);
+}
+const NAMES = { you: "you", laya: "Laya", llm: "the LLM" };
+// Any loaded model can take a mark, so two different models can play each other.
+const mover = () => picker.seatModel($("seat" + turn));
+const nameOf = (mark) => seats[mark] === "laya" ? picker.short(picker.seatModel($("seat" + mark))) : NAMES[seats[mark]];
+// Laya needs its model on the MLA; a game without Laya in it does not.
+const ready = () => (seats.X !== "laya" && seats.O !== "laya") || picker.ready;
+
+const over = () => Boolean(tttLine(board)) || !tttEmpty(board).length;
+const watching = () => $("speed").value === "watch";
+const ended = [];                      // when the last games ended, for the games-per-second figure
+const cells = TTT_SQUARES.map((name, i) => {
+  const cell = Object.assign(document.createElement("button"), { ariaLabel: name });
+  cell.onclick = () => { if (!over() && seats[turn] === "you" && !board[i]) { play(i); loop(); } };
+  $("board").append(cell);
+  return cell;
+});
+
+function draw() {
+  const line = tttLine(board), human = !over() && seats[turn] === "you";
+  cells.forEach((cell, i) => {
+    cell.textContent = board[i] || "";
+    cell.className = (board[i] ? board[i].toLowerCase() : human ? "open" : "") + (line && line.includes(i) ? " line" : "") + (i === fresh ? " fresh" : "");
+  });
+  $("winsX").textContent = record.X; $("winsO").textContent = record.O; $("draws").textContent = record.draw;
+  $("games").textContent = record.X + record.O + record.draw;
+  $("status").classList.toggle("over", over());
+  $("status").textContent = line ? `${board[line[0]]} wins: ${nameOf(board[line[0]])}` : over() ? "A draw"
+    : !picker.ready && seats[turn] === "laya" ? "No model is on the MLA. Load one in Settings."
+    : seats[turn] === "you" ? `${turn} to move: yours` : `${turn} to move: ${nameOf(turn)}` + (auto ? "" : ", paused");
+  const nobody = seats.X !== "you" && seats.O !== "you";
+  $("speed").hidden = !nobody;
+  const lately = ended.filter((at) => performance.now() - at < 10000).length / Math.min(10, Math.max(1, (performance.now() - ended[0]) / 1000 || 1));
+  $("gameRate").textContent = nobody && ended.length ? (lately < 10 ? lately.toFixed(1) : Math.round(lately)) : "\u2013";
+  $("count").textContent = stats.decisions.toLocaleString();
+  $("matched").textContent = stats.decisions ? `${stats.matched} of ${stats.decisions}` : "–";
+  if (recent.length) {
+    const mean = (key) => recent.reduce((sum, r) => sum + r[key], 0) / recent.length;
+    $("mlaMs").textContent = mean("mla").toFixed(1);
+    $("trip").textContent = mean("trip").toFixed(0) + " ms";
+    $("rate").textContent = recent.filter((r) => performance.now() - r.at < 1000).length;
+  }
+}
+
+function play(i) {
+  board[i] = turn; fresh = i;
+  turn = tttOther(turn);
+  if (over() && !counted) {
+    counted = true; const line = tttLine(board); record[line ? board[line[0]] : "draw"]++;
+    ended.push(performance.now());
+    while (ended.length > 100) ended.shift();
+  }
+  draw();
+}
+
+function newGame() {
+  round++;
+  board = Array(9).fill(null); turn = "X"; fresh = -1; counted = false;
+  $("error").hidden = true;
+  draw();
+  loop();
+}
+
+// Laya moves whenever it is its turn. With a person in the game it waits for them; two Layas play on by themselves.
+async function loop() {
+  if (busy) return;
+  busy = true;
+  const both = () => seats.X !== "you" && seats.O !== "you";
+  while (auto && ready()) {
+    if (over()) {
+      if (!both()) break;
+      break;                                         // the next game is started below, once this loop has ended
+    }
+    const who = seats[turn];
+    if (who === "you") break;
+    const playing = round, started = performance.now();
+    draw();
+    let square;
+    try { square = who === "laya" ? await decide() : await llmMove(); } catch (error) {
+      if (error instanceof NotLoaded) { picker.lost(); break; }
+      $("error").hidden = false; $("error").textContent = error.message;
+      setAuto(false);
+      break;
+    }
+    if (playing !== round) continue;
+    // With a person in the game the reply waits long enough to be seen landing. With nobody to
+    // wait for, the moves come as fast as the model decides them, unless slowed down to watch.
+    await sleep(Math.max(0, (!both() ? 250 : watching() ? 450 : 0) - (performance.now() - started)));
+    if (playing !== round) continue;
+    play(square);
+  }
+  busy = false;
+  draw();
+  if (auto && ready() && over() && seats.X !== "you" && seats.O !== "you") {
+    const finished = round;
+    setTimeout(() => { if (finished === round && auto) newGame(); }, watching() ? 1500 : 0);
+  }
+}
+
+function setAuto(value) {
+  auto = value;
+  $("auto").textContent = auto ? "Pause" : "Resume";
+  $("auto").classList.toggle("primary", !auto);
+  draw();
+  if (auto) loop();
+}
+
+$("auto").onclick = () => setAuto(!auto);
+try { if (localStorage.getItem("laya.ttt.speed") === "watch") $("speed").value = "watch"; } catch (_) { /* default */ }
+$("speed").onchange = () => { try { localStorage.setItem("laya.ttt.speed", $("speed").value); } catch (_) { /* not kept */ } };
+$("restart").onclick = newGame;
+$("resetScores").onclick = () => { record = { X: 0, O: 0, draw: 0 }; stats = { decisions: 0, matched: 0 }; recent.length = 0; draw(); };
+for (const mark of ["X", "O"]) {
+  $("seat" + mark).value = seats[mark];
+  $("seat" + mark).onchange = () => {
+    seats[mark] = $("seat" + mark).value;
+    try { localStorage.setItem("laya.ttt.seats", JSON.stringify(seats)); } catch (_) { /* not kept */ }
+    record = { X: 0, O: 0, draw: 0 };
+    llm.reset(); llm.show(seats.X === "llm" || seats.O === "llm");
+    newGame();
+  };
+}
+$("deep").onchange = () => { $("deepNote").textContent = DEEP_NOTES[$("deep").value]; };
+$("deepNote").textContent = DEEP_NOTES[$("deep").value];
+
+const llm = createLLMPlayer(document.querySelectorAll("main > section")[1]);
+llm.show(seats.X === "llm" || seats.O === "llm");
+const picker = createModelPicker({ mount: $("picker"), onReady: (loaded) => { draw(); if (loaded) loop(); } });
+picker.seats($("seatX"), $("seatO"));
+draw();
+loop();
+</script>
+</body>
+</html>

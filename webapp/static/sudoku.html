@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
-<title>Sudoku &middot; Laya on Modalix</title>
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
@@ -102,6 +102,10 @@
   .sudoku div.offered { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
   .sudoku div.chosen { box-shadow: inset 0 0 0 3px var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
   .sudoku div.mistake { color: var(--bad); }
+  .sudoku div.yours { color: var(--you); }
+  .sudoku div.open { cursor: pointer; }
+  .sudoku div.picked { box-shadow: inset 0 0 0 3px var(--you); background: color-mix(in srgb, var(--you) 16%, transparent); }
+  #digitPad button { min-width: 0; width: 38px; padding: 6px 0; font-weight: 650; }
   .sudoku div.mistake small { position: absolute; top: 2px; right: 4px; font-size: 0.5em; font-weight: 500; text-decoration: line-through; opacity: .8; }
   .sudoku div.fresh { animation: pop .35s ease-out; }
   @keyframes pop { from { transform: scale(1.5); } to { transform: scale(1); } }
@@ -115,16 +119,23 @@
 <header>
   <h1>Sudoku</h1>
   <p id="tagline">Laya fills the grid on the Modalix MLA, two decisions a cell: which cell, then which digit</p>
-  <nav><a href="/">Debate</a><a href="/questions">Questions</a><a class="here" href="/games">Games</a><a href="/models">Models</a></nav>
+  <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a class="here" href="/games">Games</a></nav>
 </header>
 <script src="/static/brand.js"></script>
-<div class="gamebar">Games <a href="/games">Dino Arena</a><a href="/games/blackjack">Blackjack</a><a href="/games/snake">Snake</a><a class="here" href="/games/sudoku">Sudoku</a>
+<div class="gamebar">Games <a href="/games">Snake</a><a href="/games/dino">Dino Arena</a><a href="/games/blackjack">Blackjack</a><a class="here" href="/games/sudoku">Sudoku</a>
   <div id="picker"></div></div>
 <main>
   <section>
     <div class="row boardhead">
       <h2>Puzzle</h2>
       <span class="row">
+        <label for="players">Players</label>
+        <select id="players" aria-label="Who fills the puzzle">
+          <option value="laya">Laya Alone</option>
+          <option value="turns">You and Laya, in Turns</option>
+          <option value="duel">Two Models, in Turns</option>
+        </select>
+        <select id="rival" aria-label="The other model" data-seat="With {}" hidden><option value="laya">With Laya</option></select>
         <label for="level">Level</label>
         <select id="level" aria-label="Level">
           <option value="easy">Easy</option>
@@ -134,7 +145,9 @@
       </span>
     </div>
     <div id="boardwrap"><div class="sudoku" id="board" role="img" aria-label="Sudoku grid"></div></div>
+    <div class="row" id="digitPad" hidden style="justify-content:center; margin-top:10px"></div>
     <div class="legend"><span><b>Bold</b> digits came with the puzzle</span><span style="color:var(--accent)">Laya's digits</span>
+      <span id="yourLegend" hidden style="color:var(--you)">your digits</span>
       <span style="color:var(--bad)">a mistake, corrected (what it wrote is struck through)</span></div>
     <div class="row controls">
       <span class="hint" id="hint">Two decisions per cell</span>
@@ -150,10 +163,12 @@
     <div class="scores">
       <div class="stat"><b id="filled">0</b><span>cells filled in this puzzle</span></div>
       <div class="stat"><b id="mistakes">0</b><span>mistakes in this puzzle</span></div>
+      <div class="stat" id="yourStat" hidden><b id="yours">0</b><span id="yourLabel">you: cells right / mistakes</span></div>
+      <div class="stat" id="layaStat" hidden><b id="layas">0</b><span id="layaLabel">Laya: cells right / mistakes</span></div>
       <div class="stat"><b id="puzzles">0</b><span>puzzles finished</span></div>
       <div class="stat"><b id="average">&ndash;</b><span>mistakes per puzzle</span></div>
     </div>
-    <div class="row controls"><span class="hint">Scores are kept until reset, and start over when the level changes.</span><button class="small" id="resetScores">Reset Scores</button></div>
+    <div class="row controls"><span class="hint">Scores are kept until reset, and start over when the level or the players change.</span><button class="small" id="resetScores">Reset Scores</button></div>
     <p class="note" id="levelNote"></p>
     <div class="error" id="error" hidden></div>
   </section>
@@ -203,6 +218,16 @@ let seed = Date.now() & 0xfffff;
 const game = new SudokuGame(seed, savedLevel());
 let auto = true, looping = false, round = 0;
 let offered = [], chosen = -1, fresh = -1;
+// With a person playing, the two take turns at a cell each, the person first.
+let turns = false, turn = "you", picked = -1;
+// Two models in turns: the other loaded model takes the turns a person would, by the same two
+// questions. `duel` is on then, and `turns` with it.
+let duel = false;
+const rivalModel = () => picker.seatModel($("rival"));
+const me = () => picker.short(picker.name);
+const other = () => !duel ? "you" : rivalModel() === picker.name ? "the other " + me() : picker.short(rivalModel());
+let owner = new Array(81).fill(null), tally = { you: [0, 0], laya: [0, 0] };       // per player: cells right, mistakes
+try { const kept = localStorage.getItem("laya.sudoku.players"); duel = kept === "duel"; turns = duel || kept === "turns"; } catch (_) { /* default */ }
 const start = () => ({ puzzles: 0, mistakes: 0, decisions: 0, matched: 0 });
 let stats = start();
 const recent = [];
@@ -210,10 +235,10 @@ const recent = [];
 class NotLoaded extends Error {}
 
 // One decision: a question whose options are described, and the option the model takes.
-async function decide(state, asked, show) {
+async function decide(state, asked, show, model = picker.name) {
   const sent = performance.now();
   const response = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: picker.name, max_len: picker.budget, state, questions: { q: asked.question } }) });
+    body: JSON.stringify({ model, max_len: picker.budgetFor(model), state, questions: { q: asked.question } }) });
   const body = await response.json();
   if (body.not_loaded) throw new NotLoaded(body.error);
   if (body.error) throw new Error(body.error);
@@ -248,15 +273,60 @@ const showDigit = (asked, answer) => {
   showOptions($("digitOptions"), asked, answer, SUDOKU_DIGIT_OUTCOMES, (level) => level >= SUDOKU_BREAKS_FROM ? "breaks" : level ? "risk" : "");
 };
 
-const cells = Array.from({ length: 81 }, () => $("board").appendChild(document.createElement("div")));
+const cells = Array.from({ length: 81 }, (_, i) => {
+  const cell = $("board").appendChild(document.createElement("div"));
+  cell.onclick = () => { if (turns && !duel && turn === "you" && !game.grid[i] && !game.done) { picked = picked === i ? -1 : i; draw(); } };
+  return cell;
+});
+for (let digit = 1; digit <= 9; digit++) {
+  const button = Object.assign(document.createElement("button"), { textContent: digit });
+  button.onclick = () => yourDigit(digit);
+  $("digitPad").append(button);
+}
+addEventListener("keydown", (event) => { if (/^[1-9]$/.test(event.key) && !event.ctrlKey && !event.metaKey && !event.altKey) yourDigit(Number(event.key)); });
 function draw() {
   cells.forEach((cell, i) => {
-    cell.className = (game.given[i] ? "given" : game.wrong[i] ? "mistake" : "")
-      + (offered.includes(i) ? " offered" : "") + (i === chosen ? " chosen" : "") + (i === fresh ? " fresh" : "");
+    cell.className = (game.given[i] ? "given" : game.wrong[i] ? "mistake" : owner[i] === "you" ? "yours" : "")
+      + (offered.includes(i) ? " offered" : "") + (i === chosen ? " chosen" : "") + (i === fresh ? " fresh" : "")
+      + (turns && !duel && turn === "you" && !game.grid[i] && !game.done ? " open" : "") + (i === picked ? " picked" : "");
     cell.textContent = game.grid[i] || "";
     if (game.wrong[i]) cell.append(Object.assign(document.createElement("small"), { textContent: game.wrong[i] }));
   });
   $("board").style.opacity = picker.ready ? 1 : 0.45;
+  for (const id of ["yourLegend", "yourStat", "layaStat"]) $(id).hidden = !turns;
+  $("digitPad").hidden = !turns || duel;
+  $("rival").hidden = !duel;
+  $("yourLabel").textContent = `${other()}: cells right / mistakes`;
+  $("layaLabel").textContent = `${me()}: cells right / mistakes`;
+  $("yours").textContent = `${tally.you[0]} / ${tally.you[1]}`;
+  $("layas").textContent = `${tally.laya[0]} / ${tally.laya[1]}`;
+  for (const button of $("digitPad").children) button.disabled = !(turns && turn === "you" && picked >= 0);
+}
+
+// A cell written by either player: who wrote it, whether it was right, and whose turn is next.
+function wrote(player, i, digit) {
+  const right = game.place(i, digit);
+  owner[i] = player; tally[player][right ? 0 : 1]++;
+  fresh = i; offered = []; chosen = picked = -1;
+  if (turns) turn = player === "you" ? "laya" : "you";
+  if (game.done) {
+    stats.puzzles++; stats.mistakes += game.mistakes;
+    $("hint").textContent = (game.mistakes ? `Finished with ${game.mistakes} mistake${game.mistakes === 1 ? "" : "s"}` : "Solved without a mistake")
+      + (turns ? `: ${other()} ${tally.you[0]} right, ${me()} ${tally.laya[0]}` : "") + ". A new puzzle starts in a moment.";
+  } else if (duel) {
+    $("hint").textContent = (right ? "" : "Not that digit; it was corrected. ") + (player === "laya" ? other() : me()) + "'s turn";
+  } else if (turns) {
+    $("hint").textContent = player === "laya" ? "Your turn: click an empty cell, then a digit"
+      : right ? "Laya's turn" : "Not that digit; it was corrected. Laya's turn";
+  }
+  draw(); showStats();
+}
+
+// A person's digit in the picked cell.
+function yourDigit(digit) {
+  if (!turns || duel || turn !== "you" || picked < 0 || game.done) return;
+  wrote("you", picked, digit);
+  loop();
 }
 
 function showStats() {
@@ -286,8 +356,10 @@ function newPuzzle(level) {
   seed = (seed * 31 + 7) & 0xfffff;
   game.reset(seed, level);
   round++;
-  offered = []; chosen = fresh = -1;
-  $("hint").textContent = picker.ready ? "Two decisions per cell" : "No model is on the MLA. Load one in the Models tab.";
+  offered = []; chosen = fresh = picked = -1;
+  owner = new Array(81).fill(null); tally = { you: [0, 0], laya: [0, 0] }; turn = "you";
+  $("hint").textContent = !picker.ready ? "No model is on the MLA. Load one in Settings."
+    : duel ? `${other()} and ${me()}, a cell each in turn` : turns ? "Your turn: click an empty cell, then a digit" : "Two decisions per cell";
   $("cellOptions").replaceChildren(); $("digitOptions").replaceChildren();
   draw(); showStats();
 }
@@ -298,29 +370,25 @@ async function loop() {
   // Watch speed is about three cells a second; otherwise the model sets the pace.
   const pace = async (started) => sleep($("speed").value === "watch" ? Math.max(0, 160 - (performance.now() - started)) : 0);
   while (auto && picker.ready) {
-    if (game.done) { await sleep(2200); if (!auto || !picker.ready) break; newPuzzle(); }
+    if (game.done) { await sleep(turns ? 4500 : 2200); if (!auto || !picker.ready) break; newPuzzle(); }
+    if (turns && !duel && turn === "you") break;      // the person's cell: their digit starts the loop again
+    // Whose cell this is: this page's model, or in a game of two models the other one.
+    const mover = duel && turn === "you" ? "you" : "laya", model = mover === "you" ? rivalModel() : picker.name;
     const playing = round;
     try {
       let started = performance.now();
       const where = game.cellQuestion();
       offered = where.cells; chosen = fresh = -1; draw();
-      const name = await decide(SUDOKU_CELL_STATE, where, showCell);
+      const name = await decide(SUDOKU_CELL_STATE, where, showCell, model);
       if (playing !== round) continue;             // a new puzzle began while the model was deciding
       chosen = where.cells.find((i) => sudokuCellName(i) === name);
       draw(); showStats();
       await pace(started);
       if (playing !== round) continue;
       started = performance.now();
-      const digit = await decide(SUDOKU_DIGIT_STATE, game.digitQuestion(chosen), showDigit);
+      const digit = await decide(SUDOKU_DIGIT_STATE, game.digitQuestion(chosen), showDigit, model);
       if (playing !== round) continue;
-      game.place(chosen, digit);
-      fresh = chosen; offered = []; chosen = -1;
-      if (game.done) {
-        stats.puzzles++; stats.mistakes += game.mistakes;
-        $("hint").textContent = (game.mistakes ? `Finished with ${game.mistakes} mistake${game.mistakes === 1 ? "" : "s"}` : "Solved without a mistake")
-          + ". A new puzzle starts in a moment.";
-      }
-      draw(); showStats();
+      wrote(mover, chosen, digit);
       await pace(started);
     } catch (error) {
       if (error instanceof NotLoaded) { picker.lost(); break; }
@@ -342,7 +410,7 @@ function setAuto(value) {
 
 function setReady(ready) {
   $("restart").disabled = $("auto").disabled = !ready;
-  $("hint").textContent = ready ? "Two decisions per cell" : "No model is on the MLA. Load one in the Models tab.";
+  $("hint").textContent = ready ? "Two decisions per cell" : "No model is on the MLA. Load one in Settings.";
   draw();
   if (ready && auto) loop();
 }
@@ -359,7 +427,20 @@ $("level").onchange = () => {
   if (auto) loop();
 };
 
+$("players").value = duel ? "duel" : turns ? "turns" : "laya";
+$("rival").onchange = () => { newPuzzle(); Object.assign(stats, { puzzles: 0, mistakes: 0 }); showStats(); if (auto) loop(); };
+$("players").onchange = () => {
+  duel = $("players").value === "duel";
+  turns = duel || $("players").value === "turns";
+  try { localStorage.setItem("laya.sudoku.players", $("players").value); } catch (_) { /* not kept */ }
+  newPuzzle();
+  Object.assign(stats, { puzzles: 0, mistakes: 0 });
+  showStats();
+  if (auto) loop();
+};
+
 const picker = createModelPicker({ mount: $("picker"), onReady: setReady });
+picker.seats($("rival"));
 showLevel(); draw(); showStats();
 </script>
 </body>

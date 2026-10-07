@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
+<link rel="stylesheet" href="/static/neat.css">
+<style>
+  /* One question, asked of every model on the MLA at once, and their answers side by side.
+     Colours, fonts and the header come from neat.css. */
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--ink); font-size: 15px; }
+  main { width: 100%; max-width: 1180px; padding: 0 24px 36px; display: grid; gap: 14px; }
+  @media (max-width: 700px) { main { padding: 0 16px 24px; } }
+  section.ask { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+                padding: 16px; display: grid; gap: 12px; }
+  .kinds { display: inline-flex; gap: 4px; padding: 4px; background: var(--chip); border: 1px solid var(--line); border-radius: 999px; justify-self: start; }
+  .kinds button { font: inherit; border: 0; background: none; color: var(--muted); padding: 5px 16px; border-radius: 999px; cursor: pointer; min-width: 0; }
+  .kinds button.here { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .fields { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; }
+  @media (max-width: 820px) { .fields { grid-template-columns: minmax(0, 1fr); } }
+  .fields > div { display: grid; gap: 10px; align-content: start; }
+  label.field { display: grid; gap: 5px; font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  label.field small { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 12.5px; }
+  textarea, input[type=text] { font: 15px/1.45 inherit; font-family: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+                               border-radius: var(--radius-sm); padding: 9px 11px; width: 100%; resize: vertical; }
+  textarea:focus, input[type=text]:focus { outline: 0; border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+  .examples { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13.5px; color: var(--muted); }
+  .examples button { font: inherit; font-size: 13.5px; padding: 5px 13px; border: 1px solid var(--line); cursor: pointer; min-width: 0; }
+  .who { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13.5px; color: var(--muted); }
+  .who button { font: inherit; font-size: 13.5px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; min-width: 0;
+                background: var(--panel); color: var(--muted); display: inline-flex; align-items: center; gap: 7px; }
+  .who button i { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+  .who button.in { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); }
+  .verdict { margin: 4px 0 0; font-size: 19px; font-weight: 650; letter-spacing: -.015em; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .verdict .agree { color: var(--good); } .verdict .differ { color: var(--warn); }
+  .verdict small { font-size: 14px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+  .verdict button { font: inherit; font-size: 14px; font-weight: 600; padding: 5px 14px; cursor: pointer; border: 1px solid var(--accent); }
+  .tiles { display: grid; gap: 12px; transition: opacity .15s ease; }
+  .tiles.asking, .verdict.asking { opacity: .45; }      /* the answers on show are to the question before */
+  .result { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 15px 16px;
+            display: grid; gap: 10px; align-content: start; border-top: 3px solid var(--tint, var(--line)); }
+  .result.out { opacity: .8; border-style: dashed; border-top-style: solid; }
+  .result h3 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .result h3 span { font-size: 12px; font-weight: 500; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+  .result .said { font-size: 26px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; overflow-wrap: anywhere; }
+  .result .said small { font-size: 14px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-left: 6px; }
+  .result .rows { display: grid; gap: 6px; }
+  .result .row { display: grid; grid-template-columns: minmax(64px, 34%) minmax(0, 1fr) 52px; gap: 8px; align-items: center; font-size: 13.5px; }
+  .result .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .result .row.top .name { color: var(--ink); font-weight: 600; }
+  .result .row .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .result .row .track i { display: block; height: 100%; background: var(--faint); border-radius: 999px; transition: width .18s ease; }
+  .result .row.top .track i { background: var(--tint, var(--accent)); }
+  .result .row .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .result .foot { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .result .problem { color: var(--bad); font-size: 13.5px; overflow-wrap: anywhere; }
+  .note { color: var(--muted); font-size: 13.5px; margin: 0; }
+  .error { color: var(--bad); margin: 0; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Compare</h1>
+  <p>One question, asked of every loaded model at once</p>
+  <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a class="here" href="/compare">Compare</a><a href="/games">Games</a></nav>
+</header>
+<script src="/static/brand.js"></script>
+<main>
+  <section class="ask">
+    <div class="kinds" id="kinds" role="tablist" aria-label="Kind of question">
+      <button type="button" data-kind="noul">Yes or No</button><button type="button" data-kind="choice">Choice</button><button type="button" data-kind="score">Score</button>
+    </div>
+    <div class="fields">
+      <div>
+        <label class="field">Text <small>what the question is about; a yes-or-no question can stand alone</small>
+          <textarea id="state" rows="4" placeholder="Customer: my invoice was charged twice and nobody answers the phone!"></textarea></label>
+      </div>
+      <div>
+        <label class="field">Question
+          <input type="text" id="question" autocomplete="off" placeholder="Is this urgent?"></label>
+        <label class="field" id="optionsField"><span id="optionsLabel">Options</span> <small id="optionsHelp"></small>
+          <textarea id="options" rows="3"></textarea></label>
+      </div>
+    </div>
+    <div class="examples" id="examples">Try</div>
+    <div class="who" id="who" hidden></div>
+  </section>
+  <p class="verdict" id="verdict">&nbsp;</p>
+  <p class="error" id="error" hidden></p>
+  <div class="tiles" id="results" data-min="215"></div>
+  <p class="note">Every loaded model is asked the same thing at the same moment, each in its own runtime; the MLA takes their graphs in
+    turn, so a model's time here includes waiting for the others. A bare yes-or-no question is put to each kind of model in the form
+    it answers best. Models are loaded and unloaded in Settings, behind the gear.</p>
+</main>
+<script src="/static/model-picker.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  for (const child of children) node.append(child);
+  return node;
+};
+const COLOURS = ["#16c8a6", "#3a86ec", "#a9c81c", "#f2801d", "#4bb54a", "#b06be0"];   // as Settings colours them
+const EXAMPLES = [
+  { name: "Twice-Charged Invoice", kind: "choice", state: "Customer: my invoice was charged twice and nobody answers the phone!",
+    question: "Which team should handle this?", options: "billing: Charges, invoices, refunds\ntechnical: Bugs and outages\nsales: New orders and upgrades" },
+  { name: "Checkout Outage", kind: "score", state: "The checkout page has returned a 500 error for every customer since 09:12.",
+    question: "How severe is this?", options: "A cosmetic flaw\nA minor problem\nA major problem\nA critical outage" },
+  { name: "Page the Engineer", kind: "noul", state: "The checkout page has returned a 500 error for every customer since 09:12.",
+    question: "Should the on-call engineer be paged now?", options: "" },
+  { name: "Capital of Spain", kind: "noul", state: "", question: "Is Berlin the capital of Spain?", options: "" },
+  { name: "Wings", kind: "noul", state: "", question: "Do birds have wings?", options: "" },
+];
+const KINDS = { noul: ["", ""], choice: ["Options", "one a line, as “name: what it covers”"], score: ["Levels", "one a line, from lowest to highest"] };
+
+let kind = "noul", info = null, sequence = 0, flying = false, again = false, asked = "";
+const title = (name) => CHECKPOINT_TITLES[info?.models[name]?.checkpoint] || name;
+const everyLoaded = () => info?.loaded || [];
+
+// Which of the loaded models take part. To begin with, every one that is not a game's own
+// model (those answer about a board, not a support ticket), or all of them if that leaves
+// fewer than two. A click on a model's name takes it out or puts it back; the choice is kept
+// for the browser session.
+const LEFT_OUT = "laya.compare.out";
+let out = (() => { try { return new Set(JSON.parse(sessionStorage.getItem(LEFT_OUT) || "null")); } catch (_) { return new Set(); } })();
+let chosen = (() => { try { return sessionStorage.getItem(LEFT_OUT) !== null; } catch (_) { return false; } })();
+function loaded() {
+  const all = everyLoaded();
+  if (!chosen) {
+    const general = all.filter((name) => !/chess|dino/.test(info.models[name].checkpoint || ""));
+    return general.length >= 2 ? general : all;
+  }
+  return all.filter((name) => !out.has(name));
+}
+function showWho() {
+  const all = everyLoaded(), taking = loaded();
+  $("who").hidden = all.length < 3;
+  $("who").replaceChildren("Models", ...all.map((name) => {
+    const dot = el("i");
+    if (taking.includes(name)) dot.style.background = COLOURS[taking.indexOf(name) % COLOURS.length];
+    return el("button", { type: "button", className: taking.includes(name) ? "in" : "", title: taking.includes(name) ? "Leave it out" : "Ask it too",
+      onclick: () => {
+        out = new Set(all.filter((other) => !taking.includes(other)));
+        out.has(name) ? out.delete(name) : out.add(name);
+        chosen = true;
+        try { sessionStorage.setItem(LEFT_OUT, JSON.stringify([...out])); } catch (_) { /* not kept */ }
+        showWho(); draw(null); ask();
+      } }, dot, title(name));
+  }));
+}
+
+function setKind(next) {
+  kind = next;
+  for (const button of $("kinds").children) button.classList.toggle("here", button.dataset.kind === kind);
+  $("optionsField").hidden = kind === "noul";
+  [$("optionsLabel").textContent, $("optionsHelp").textContent] = KINDS[kind];
+  changed();
+}
+for (const button of $("kinds").children) button.onclick = () => setKind(button.dataset.kind);
+for (const example of EXAMPLES) {
+  $("examples").append(el("button", { type: "button", textContent: example.name, onclick: () => {
+    $("state").value = example.state; $("question").value = example.question; $("options").value = example.options;
+    setKind(example.kind);
+  } }));
+}
+
+// What to send for what is typed, or a word on what is missing.
+function request() {
+  const state = $("state").value.trim(), question = $("question").value.trim();
+  const lines = $("options").value.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (!question) return "Type a question.";
+  if (kind === "noul") {
+    return state ? { state, questions: { answer: { type: "noul", instructions: question } } } : { yes_no: question };
+  }
+  if (!state) return "Give the text the question is about.";
+  if (lines.length < 2) return kind === "choice" ? "Give two or more options, one a line." : "Give two or more levels, one a line.";
+  if (kind === "score") return { state, questions: { answer: { type: "score", instructions: question, criteria: lines } } };
+  const criteria = {};
+  for (const line of lines) {
+    const at = line.indexOf(":");
+    criteria[(at < 0 ? line : line.slice(0, at)).trim()] = at < 0 ? "" : line.slice(at + 1).trim();
+  }
+  return { state, questions: { answer: { type: "choice", instructions: question, criteria } } };
+}
+
+// An answer of any kind as rows of (label, share), with the one the model chose.
+function rows(result) {
+  const answer = result.answers.answer;
+  if (typeof result.yes === "number" || answer.type === "noul") {
+    const yes = typeof result.yes === "number" ? result.yes : answer.noul;
+    return { said: yes >= 0.5 ? "Yes" : "No", rows: [["Yes", yes], ["No", 1 - yes]] };
+  }
+  const names = Object.keys(answer.probabilities);
+  const label = (key) => answer.type === "score" ? answer.legend[key] : key;
+  const top = names.reduce((best, key) => answer.probabilities[key] > answer.probabilities[best] ? key : best, names[0]);
+  return { said: label(top), rows: names.map((key) => [label(key), answer.probabilities[key]]),
+           extra: answer.type === "score" ? `${answer.score.toFixed(2)} of ${names.length - 1}` : "" };
+}
+
+function card(name, result, index) {
+  const model = info.models[name];
+  const node = el("div", { className: "result" + (result ? "" : " out") });
+  node.style.setProperty("--tint", COLOURS[index % COLOURS.length]);
+  node.append(el("h3", {}, title(name), el("span", { textContent: model?.kind === "clm" ? "CLM" : "Laya" })));
+  if (!result) { node.append(el("div", { className: "foot", textContent: "Waiting for a question" })); return [node, null]; }
+  if (result.error) { node.append(el("div", { className: "problem", textContent: result.error })); return [node, null]; }
+  const shown = rows(result), usage = result.usage;
+  node.append(el("div", { className: "said" }, shown.said, shown.extra ? el("small", { textContent: shown.extra }) : ""));
+  const list = el("div", { className: "rows" });
+  const best = Math.max(...shown.rows.map(([, share]) => share));
+  for (const [label, share] of shown.rows) {
+    const fill = el("i"); fill.style.width = (share * 100).toFixed(1) + "%";
+    list.append(el("div", { className: "row" + (share === best ? " top" : "") },
+      el("span", { className: "name", textContent: label, title: label }), el("span", { className: "track" }, fill),
+      el("span", { className: "pct", textContent: (share * 100).toFixed(1) + "%" })));
+  }
+  node.append(list, el("div", { className: "foot", textContent:
+    `${usage.mla_ms.toFixed(1)} ms on the MLA · ${result.server_ms.toFixed(0)} ms with waiting · ${usage.tokens} tokens`
+    + (usage.encoder_passes !== undefined ? ` · ${usage.encoder_passes} texts embedded, ${usage.cached} from memory` : "")
+    + (usage.truncated ? ` · ${usage.state_tokens_dropped} tokens cut` : "") }));
+  return [node, shown.said];
+}
+
+function draw(body) {
+  const names = loaded();
+  const settings = el("button", { type: "button", className: "primary", textContent: "Open Settings", onclick: () => window.openSettings?.() });
+  if (!names.length) {
+    $("results").replaceChildren();
+    $("verdict").replaceChildren(everyLoaded().length ? "No Model Is Chosen" : "No Model Is on the MLA",
+      el("small", { textContent: everyLoaded().length ? "Choose two or more above." : "Load two or more to compare them." }), everyLoaded().length ? "" : settings);
+    return;
+  }
+  const cards = names.map((name, index) => card(name, body?.results?.[name], index));
+  $("results").replaceChildren(...cards.map(([node]) => node));
+  const said = cards.map(([, label]) => label).filter((label) => label !== null);
+  if (names.length < 2) {
+    $("verdict").replaceChildren(everyLoaded().length > 1 ? "One Model Is Chosen" : "One Model Is Loaded",
+      el("small", { textContent: everyLoaded().length > 1 ? "Choose another above to compare them." : "Load another to compare them." }),
+      everyLoaded().length > 1 ? "" : settings);
+  } else if (said.length < 2) {
+    $("verdict").replaceChildren(`${names.length} Models Are Chosen`, el("small", { textContent: typeof asked === "string" && asked ? asked : "" }));
+  } else if (said.every((label) => label === said[0])) {
+    $("verdict").replaceChildren(el("span", { className: "agree", textContent: `All ${said.length} Models Agree` }), el("small", { textContent: said[0] }));
+  } else {
+    const counts = {};
+    for (const label of said) counts[label] = (counts[label] || 0) + 1;
+    $("verdict").replaceChildren(el("span", { className: "differ", textContent: "The Models Differ" }),
+      el("small", { textContent: Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([label, count]) => `${count} say ${label}`).join(", ") }));
+  }
+}
+
+// Live: one request at a time, and as soon as it returns, another if the text has changed.
+async function ask() {
+  if (flying) { again = true; return; }
+  const sending = request();
+  if (typeof sending === "string" || !loaded().length) { asked = typeof sending === "string" ? sending : ""; draw(null); return; }
+  sending.models = loaded();
+  flying = true; again = false;
+  const mine = ++sequence;
+  const stale = setTimeout(() => { $("results").classList.add("asking"); $("verdict").classList.add("asking"); }, 120);
+  let body;
+  try {
+    body = await (await fetch("/api/compare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sending) })).json();
+  } catch (error) {
+    body = { error: "The board did not answer: " + error.message };
+  }
+  flying = false;
+  clearTimeout(stale);
+  if (!again) { $("results").classList.remove("asking"); $("verdict").classList.remove("asking"); }
+  if (mine === sequence) {
+    $("error").hidden = !body.error || Boolean(body.not_loaded);
+    if (body.error && !body.not_loaded) $("error").textContent = body.error;
+    if (body.not_loaded) await refresh(); else draw(body);
+  }
+  if (again) ask();
+}
+let typing = null;
+function changed() { clearTimeout(typing); typing = setTimeout(ask, 180); }
+for (const id of ["state", "question", "options"]) $(id).oninput = changed;
+
+// Which models are loaded: asked again when that changes, and when Settings closes.
+let known = "";
+async function refresh() {
+  try { info = await (await fetch("/api/info")).json(); } catch (_) { return; }
+  const now = everyLoaded().join("\n");
+  if (now !== known) { known = now; showWho(); draw(null); ask(); }
+}
+addEventListener("settings-closed", refresh);
+(async function poll() { await refresh(); setTimeout(poll, 2000); })();
+
+const first = EXAMPLES[0];
+$("state").value = first.state; $("question").value = first.question; $("options").value = first.options;
+setKind(first.kind);
+</script>
+</body>
+</html>

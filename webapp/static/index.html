@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
-<title>Questions &middot; Laya on Modalix</title>
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
@@ -95,10 +95,6 @@
   .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .hero .value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
   .hero .unit { color: var(--muted); }
-  .budget { position: relative; height: 10px; background: var(--track); border-radius: 999px; margin: 10px 0 4px; }
-  .budget .fill { height: 100%; border-radius: 999px; background: var(--good); width: 0; transition: width .18s; }
-  .budget .fill.over { background: var(--bad); }
-  .budget .mark { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); opacity: .55; }
   .legend { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; margin-top: 12px; }
   .stat { background: var(--chip); border-radius: 8px; padding: 8px 10px; }
@@ -131,7 +127,7 @@
 <header>
   <h1>Questions</h1>
   <p>Your own questions and options, decided in one forward pass on the Modalix MLA</p>
-  <nav><a href="/">Debate</a><a class="here" href="/questions">Questions</a><a href="/games">Games</a><a href="/models">Models</a></nav>
+  <nav><a href="/debate">Debate</a><a class="here" href="/questions">Questions</a><a href="/compare">Compare</a><a href="/games">Games</a></nav>
   <div class="chips" id="chips"></div>
 </header>
 <script src="/static/brand.js"></script>
@@ -171,9 +167,7 @@
     </div>
     <div class="hero"><span class="value" id="perDecision">&ndash;</span>
       <span class="unit">ms on the MLA per decision</span></div>
-    <div class="budget"><div class="fill" id="budgetFill"></div><div class="mark" id="budgetMark"></div></div>
-    <div class="legend"><span>0 ms</span><span>30 ms budget</span><span id="budgetMax">45 ms</span></div>
-    <div class="stats" id="stats"></div>
+    <div class="stats" id="stats" data-min="118"></div>
     <h2 style="margin-top:18px">Decisions</h2>
     <div id="answers"></div>
     <div class="error" id="error" hidden></div>
@@ -183,7 +177,6 @@
 
 <script src="/static/model-picker.js"></script>
 <script>
-const BUDGET_MS = 30, BUDGET_SCALE_MS = 45;
 
 const PRESETS = [
   { name: "Support Triage",
@@ -355,18 +348,16 @@ async function decide() {
 function renderLatency(usage, serverMs, roundTrip) {
   const per = usage.mla_ms / usage.decisions;
   $("perDecision").textContent = per.toFixed(1);
-  const fill = $("budgetFill");
-  fill.style.width = Math.min(100, per / BUDGET_SCALE_MS * 100) + "%";
-  fill.classList.toggle("over", per > BUDGET_MS);
   const stat = (value, label) => el("div", { className: "stat" }, el("b", { textContent: value }), el("span", { textContent: label }));
   $("stats").replaceChildren(
     stat(usage.decisions, usage.decisions === 1 ? "decision" : "decisions"),
     stat(usage.latency_ms.toFixed(1) + " ms", "runtime total"),
     stat(usage.mla_ms.toFixed(1) + " ms", "MLA"),
-    stat((usage.tokenize_ms + usage.pre_ms + usage.post_ms).toFixed(2) + " ms", "CPU pre + post"),
-    stat(usage.tokens + " / " + usage.max_len, "tokens used / budget"),
+    stat(usage.tokenize_ms.toFixed(2) + " ms", "tokenizing"),
+    stat((usage.pre_ms + usage.post_ms).toFixed(2) + " ms", "CPU pre + post"),
+    // Always eight tiles, so they sit in even rows; what was cut is said in the tokens tile.
+    stat(usage.tokens + " / " + usage.max_len, usage.truncated ? `tokens used / budget, ${usage.state_tokens_dropped} cut from the state` : "tokens used / budget"),
     stat(usage.seq_len + " tokens", "graph it ran on"),
-    ...(usage.truncated ? [stat(usage.state_tokens_dropped, "tokens cut from the state")] : []),
     stat(roundTrip.toFixed(0) + " ms", "browser round trip"));
 }
 
@@ -396,11 +387,12 @@ function renderAnswers(answers) {
         el("span", { className: "track" }, inner),
         el("span", { className: "pct", textContent: (p * 100).toFixed(1) + "%" })));
     }
-    const act = a.action.act_probability >= 0.5;
+    // Laya also says whether to act on its answer or hand the question on; CLM has no such output.
+    const act = a.action ? a.action.act_probability >= 0.5 : null;
     card.append(el("div", { className: "meta" },
-      el("span", { className: "tag " + (act ? "act" : "escalate"), textContent: act ? "act" : "escalate" }),
+      act === null ? "" : el("span", { className: "tag " + (act ? "act" : "escalate"), textContent: act ? "act" : "escalate" }),
       el("span", { textContent: "answer confidence " + (a.answer_confidence * 100).toFixed(1) + "%" }),
-      el("span", { textContent: "act probability " + (a.action.act_probability * 100).toFixed(1) + "%" })));
+      act === null ? "" : el("span", { textContent: "act probability " + (a.action.act_probability * 100).toFixed(1) + "%" })));
     root.append(card);
   }
 }
@@ -455,8 +447,6 @@ function addQuestion(type) {
 }
 
 renderPresets();
-$("budgetMark").style.left = (BUDGET_MS / BUDGET_SCALE_MS * 100) + "%";
-$("budgetMax").textContent = BUDGET_SCALE_MS + " ms";
 $("state").oninput = changed;
 $("run").onclick = decide;
 for (const button of document.querySelectorAll("[data-add]")) button.onclick = () => addQuestion(button.dataset.add);
@@ -466,7 +456,6 @@ function clearResults(message) {
   $("answers").replaceChildren(el("p", { className: "empty", textContent: message }));
   $("stats").replaceChildren();
   $("perDecision").textContent = "\u2013";
-  $("budgetFill").style.width = "0";
   $("raw").textContent = "";
   $("error").hidden = true;
   $("clear").disabled = true;
@@ -491,7 +480,7 @@ $("save").onclick = () => {
 };
 // The page uses whichever model the model manager has loaded, and starts over when that changes.
 const picker = createModelPicker({ mount: $("picker"), onReady: (ready) => {
-  if (!ready) return clearResults("No model is on the MLA. Load one in the Models tab.");
+  if (!ready) return clearResults("No model is on the MLA. Load one in Settings.");
   const info = picker.models[picker.name];
   const chip = (text) => el("span", { className: "chip", textContent: text });
   $("chips").replaceChildren(

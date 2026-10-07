@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f4b; --warn: #b45309; --bad: #c0362c;
+    --track: #e8ebf1; --chip: #eef2f8; --field: #ffffff; --sky: #f9fafc; --you: #b45309;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebf0; --muted: #98a2b3; --line: #2a303a;
+      --accent: #5b9dff; --accent-ink: #0b1220; --good: #4cc38a; --warn: #f0a84b; --bad: #f47067;
+      --track: #232934; --chip: #1f252e; --field: #11151a; --sky: #12161b; --you: #f0a84b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 18px 24px 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid transparent; font-size: 14px; }
+  nav a:hover { border-color: var(--line); }
+  nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
+  main { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 16px;
+         padding: 0 24px 32px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 0 16px 24px; }
+                              header { padding: 16px 16px 10px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .controls { margin-top: 12px; justify-content: space-between; }
+  .hint { color: var(--muted); font-size: 13.5px; }
+  kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+        padding: 1px 6px; background: var(--chip); color: var(--ink); }
+  button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--chip); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-variant-numeric: tabular-nums; font-size: 16px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero .value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .hero .unit { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+        font: 12.5px/1.4 var(--mono); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bar { display: grid; grid-template-columns: 48px minmax(0, 1fr) 52px; gap: 8px; align-items: center;
+         margin-top: 6px; font-size: 13.5px; }
+  .bar .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .bar.top .track i { opacity: 1; }
+  .bar.top .name { font-weight: 650; }
+  .bar .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .block { margin-top: 16px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px; }
+  .slider-head { display: flex; justify-content: space-between; font-size: 13.5px; }
+  .slider-head b { font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .error { color: var(--bad); margin-top: 10px; overflow-wrap: anywhere; }
+  .gamebar { display: flex; gap: 6px; align-items: center; padding: 0 24px 12px; color: var(--muted); font-size: 14px; }
+  .gamebar a { color: var(--muted); text-decoration: none; padding: 3px 12px; border-radius: 8px; border: 1px solid var(--line); }
+  .gamebar a.here { color: var(--ink); background: var(--chip); border-color: var(--accent); }
+  @media (max-width: 900px) { .gamebar { padding: 0 16px 10px; } }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+  select { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 8px; }
+  .boardhead { justify-content: space-between; margin-bottom: 10px; }
+  .boardhead h2 { margin: 0; }
+  .boardhead label { color: var(--muted); font-size: 13.5px; }
+  #boardwrap { display: flex; justify-content: center; }
+  /* The board: eight by eight squares, pieces as chess glyphs coloured by side. */
+  /* A board keeps its own colours in a dark page too: the pieces have to stand out on both kinds of square. */
+  :root { --sq-light: #e7ecef; --sq-dark: #8fb3ad; --sq-mark: #f2d16b; --piece-white: #ffffff; --piece-black: #1d2329; }
+  @media (prefers-color-scheme: dark) { :root { --sq-light: #c9d3da; --sq-dark: #6f9690; --sq-mark: #e3c25a; } }
+  .chess { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: min(100%, 560px, 68vh); aspect-ratio: 1;
+           border: 2px solid var(--ink); border-radius: 8px; overflow: hidden; user-select: none; }
+  .chess div { position: relative; display: flex; align-items: center; justify-content: center; min-height: 0; overflow: hidden; background: var(--sq-light);
+               font-family: "DejaVu Sans", "Segoe UI Symbol", "Noto Sans Symbols2", "Apple Symbols", "Arial Unicode MS", sans-serif;
+               font-size: min(8.2vh, 60px, 9.5vw); line-height: 1; }
+  .chess div.dark { background: var(--sq-dark); }
+  .chess div.last { background: color-mix(in srgb, var(--sq-mark) 70%, var(--sq-light)); }
+  .chess div.dark.last { background: color-mix(in srgb, var(--sq-mark) 60%, var(--sq-dark)); }
+  .chess div.picked { box-shadow: inset 0 0 0 4px var(--accent); }
+  .chess div.thinking { box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--accent) 60%, transparent); }
+  .chess div.check { background: color-mix(in srgb, var(--bad) 55%, var(--sq-light)); }
+  .chess div.target::after { content: ""; position: absolute; width: 26%; height: 26%; border-radius: 50%; background: color-mix(in srgb, var(--accent) 70%, transparent); }
+  .chess div.target.capture::after { width: 86%; height: 86%; background: none; border: 4px solid color-mix(in srgb, var(--accent) 75%, transparent); }
+  .chess div.mine { cursor: pointer; } .chess div.target { cursor: pointer; }
+  .chess .w { color: var(--piece-white); -webkit-text-stroke: 1.4px #222b33; paint-order: stroke fill; text-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+  .chess .b { color: var(--piece-black); -webkit-text-stroke: 1px #dfe5ea; paint-order: stroke fill; }
+  .chess small { position: absolute; font: 600 10px var(--mono); color: #2c3a40; opacity: .75; -webkit-text-stroke: 0; text-shadow: none; }
+  .chess small.file { right: 3px; bottom: 1px; } .chess small.rank { left: 3px; top: 1px; }
+  .seats { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  /* The live score: who is ahead, by the model's own estimate and by the pieces left. A bar
+     is White's share from the left; the trace is White's estimated win chance move by move. */
+  .score { margin: 14px auto 0; width: min(100%, 560px); }
+  .scorehead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  .scorehead h2 { margin: 0; }
+  .scorehead .lead { font-weight: 650; font-size: 14.5px; text-align: right; }
+  .scorerow { display: grid; grid-template-columns: 112px 58px minmax(0, 1fr) 58px; gap: 8px; align-items: center; margin-top: 5px; font-size: 13.5px; }
+  .scorerow .what { color: var(--muted); }
+  .scorerow .side { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .scorerow .side.right { text-align: right; }
+  .scorebar { height: 12px; border-radius: 999px; overflow: hidden; background: #2a323c; border: 1px solid var(--line); }
+  .scorebar i { display: block; height: 100%; width: 50%; background: #f1f4f7; transition: width .4s ease; }
+  .scoretrace { display: block; width: 100%; height: 44px; margin-top: 8px; background: var(--field); border: 1px solid var(--line); border-radius: 8px; }
+  .scoretrace line { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+  .scoretrace polyline { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+  .scorefoot { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+  .status { min-height: 24px; font-weight: 600; }
+  .status.over { color: var(--accent-strong, var(--accent)); }
+  .movelist { margin-top: 12px; max-height: 96px; overflow-y: auto; font: 13px/1.7 var(--mono); color: var(--muted);
+              background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  .movelist b { color: var(--ink); font-weight: 600; }
+  .movelist small { font-size: 11px; color: var(--muted); margin-left: 3px; }
+  /* How long each side takes over a move. */
+  .latency { margin-top: 12px; display: grid; gap: 6px; }
+  .latency .scorehead { margin-bottom: 0; }
+  .latrow { display: grid; grid-template-columns: minmax(96px, 1.1fr) repeat(3, minmax(0, 1fr)); gap: 8px; align-items: baseline; font-size: 13.5px;
+            padding: 7px 11px; background: var(--chip); border-radius: var(--radius-sm); font-variant-numeric: tabular-nums; }
+  .latrow.head { background: none; padding: 0 11px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .latrow .who { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .latrow .who small { font-weight: 400; color: var(--muted); margin-left: 5px; }
+  .latrow span b { font-weight: 650; }
+  .option { display: grid; grid-template-columns: 64px minmax(0, 1fr) 52px; gap: 2px 8px; align-items: center; margin-top: 6px; font-size: 13.5px; }
+  .option .name { font-family: var(--mono); }
+  .option.top .name { font-weight: 700; }
+  .option .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .option .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .option.top .track i { opacity: 1; }
+  .option .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .option.exact .pct { color: var(--good); }
+  .option .name small { color: var(--warn); font-family: inherit; }
+  .asked { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+</style>
+<link rel="stylesheet" href="/static/neat.css">
+</head>
+<body>
+<header>
+  <h1>Chess</h1>
+  <p id="tagline">Laya scores every legal move on the Modalix MLA and plays the one it rates highest. Play it, or set it against a language model</p>
+  <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a class="here" href="/games">Games</a></nav>
+</header>
+<script src="/static/brand.js"></script>
+<div class="gamebar">Games <div id="picker"></div></div>
+<main>
+  <section>
+    <div class="row boardhead">
+      <h2>Board</h2>
+      <span class="seats">
+        <label for="white">White</label><select id="white" aria-label="Who plays white"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option></select>
+        <label for="black">Black</label><select id="black" aria-label="Who plays black"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option></select>
+      </span>
+    </div>
+    <div id="boardwrap"><div class="chess" id="board" role="grid" aria-label="Chess board"></div></div>
+    <div class="score" aria-live="off">
+      <div class="scorehead"><h2>Live Score</h2><span class="lead" id="lead">&nbsp;</span></div>
+      <div class="scorerow"><span class="what">Laya's estimate</span>
+        <span class="side" id="estWhite">&ndash;</span><span class="scorebar"><i id="estFill"></i></span><span class="side right" id="estBlack">&ndash;</span></div>
+      <div class="scorerow"><span class="what">Material</span>
+        <span class="side" id="matWhite">&ndash;</span><span class="scorebar"><i id="matFill"></i></span><span class="side right" id="matBlack">&ndash;</span></div>
+      <svg class="scoretrace" id="scoreTrace" viewBox="0 0 300 44" preserveAspectRatio="none" role="img" aria-label="White's estimated win chance over the game">
+        <line x1="0" y1="22" x2="300" y2="22"></line><polyline id="scoreLine" points=""></polyline></svg>
+      <div class="scorefoot"><span>White ahead above the line, Black below</span><span id="scoreNote">&nbsp;</span></div>
+    </div>
+    <div class="row controls">
+      <span class="status" id="status">&nbsp;</span>
+      <span class="row">
+        <select id="look" aria-label="How far Laya looks">
+          <option value="1">One Look</option>
+          <option value="2">Second Look</option>
+        </select>
+        <button id="undo">Take Back</button>
+        <button id="restart">New Game</button>
+        <button id="auto">Pause</button>
+      </span>
+    </div>
+    <div class="movelist" id="moves" aria-label="Moves played">&nbsp;</div>
+    <div class="latency" aria-live="off">
+      <div class="scorehead"><h2>Latency per Move</h2><span class="lead" id="latencyNote">&nbsp;</span></div>
+      <div class="latrow head"><span>Side</span><span>Last Move</span><span>Average</span><span>Decisions a Move</span></div>
+      <div class="latrow"><span class="who" id="latWhoW">White</span><span id="latLastW">&ndash;</span><span id="latMeanW">&ndash;</span><span id="latCountW">&ndash;</span></div>
+      <div class="latrow"><span class="who" id="latWhoB">Black</span><span id="latLastB">&ndash;</span><span id="latMeanB">&ndash;</span><span id="latCountB">&ndash;</span></div>
+    </div>
+    <div class="scores">
+      <div class="stat"><b id="moveNo">1</b><span>move</span></div>
+      <div class="stat"><b id="record">0 / 0 / 0</b><span>white wins / draws / black wins</span></div>
+    </div>
+    <div class="row controls"><span class="hint">Click a piece, then a marked square. A pawn reaching the last rank becomes a queen.</span><button class="small" id="resetScores">Reset Scores</button></div>
+    <p class="note" id="lookNote"></p>
+    <div class="error" id="error" hidden></div>
+  </section>
+
+  <section>
+    <h2>Laya's decisions</h2>
+    <div class="hero"><span class="value" id="mlaMs">&ndash;</span><span class="unit">ms on the MLA per decision</span></div>
+    <div class="stats">
+      <div class="stat"><b id="rate">&ndash;</b><span>decisions per second</span></div>
+      <div class="stat"><b id="count">0</b><span>decisions made</span></div>
+      <div class="stat"><b id="graph">&ndash;</b><span>graph it ran on</span></div>
+      <div class="stat"><b id="trip">&ndash;</b><span>browser round trip</span></div>
+    </div>
+    <div class="block">
+      <h2>What it is asked</h2>
+      <pre id="sees">&ndash;</pre>
+      <p class="asked" id="asked" style="margin-top:8px">&nbsp;</p>
+      <p class="note">One question per legal move: the position as two lists of pieces, the move in words, and ten levels of
+        win chance to choose from. The model is LayaChess, Laya fine-tuned on two million Stockfish-rated moves.</p>
+    </div>
+    <div class="block">
+      <h2>How it rates the moves</h2>
+      <p class="asked" id="ratedNote">&nbsp;</p>
+      <div id="options"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/vendor/chess.js"></script>
+<script src="/static/chess-core.js"></script>
+<script src="/static/model-picker.js"></script>
+<script src="/static/llm-player.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const GLYPH = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+// Said under the board whatever the look: how Laya is kept from repeating.
+const REPEAT_NOTE = " It does not repeat itself: a move back into a position the game has already been in is marked down by five points, "
+  + "and one that would bring a position about for the third time is left out while it has any other move.";
+const LOOK_NOTES = {
+  1: "One look: Laya scores each legal move once and plays the best, about thirty decisions a move.",
+  2: "Second look: after scoring every move, Laya also scores every reply to its three best, and weighs each of those moves "
+     + "against the best reply to it. About four times the decisions, and four times the wait.",
+};
+
+const game = new Chess();
+let seats = { w: "you", b: "laya" };       // who plays each colour
+let auto = true, busy = false, round = 0;
+let picked = null, considering = null, lastMove = null;
+// Laya's own view of the game, kept as it plays: after each of its moves, the win chance it
+// gave the move it chose, turned to White's side. One entry per move Laya made.
+let estimates = [];
+// How long each move took its mover: { ply, colour, who, ms (all of it, as the player waits),
+// mla (the part on the MLA), decisions }. A model's and a language model's moves; not a person's.
+let timings = [], moveMla = 0;
+let record = { w: 0, d: 0, b: 0 }, counted = false;
+let stats = { decisions: 0 };
+const recent = [];
+try { Object.assign(seats, JSON.parse(localStorage.getItem("laya.chess.seats")) || {}); } catch (_) { /* defaults */ }
+
+class NotLoaded extends Error {}
+class Stale extends Error {}
+
+// One decision: the win chance of the side to move after `move`.
+async function rate(position, state, move, playing) {
+  const question = chessQuestion(position, move), sent = performance.now();
+  const response = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: mover(), max_len: picker.budgetFor(mover()), state, questions: { q: question } }) });
+  const body = await response.json();
+  if (playing !== round) throw new Stale();
+  if (body.not_loaded) throw new NotLoaded(body.error);
+  if (body.error) throw new Error(body.error);
+  picker.report(body.usage);
+  recent.push({ at: performance.now(), mla: body.usage.mla_ms, trip: performance.now() - sent });
+  while (recent.length > 80) recent.shift();
+  stats.decisions++;
+  moveMla += body.usage.mla_ms;
+  $("graph").textContent = body.usage.seq_len + " tokens";
+  if (body.usage.truncated) { $("error").hidden = false; $("error").textContent = "The position did not fit the token budget, so part of it was cut. Raise the budget or load the 256-token graph."; }
+  $("asked").textContent = question.instructions;
+  return chessWinChance(body.answers.q);
+}
+
+// Every legal move of a position, rated: by the rules where they decide (mate, a draw), else by the model.
+async function rateAll(position, playing, show) {
+  const moves = position.moves({ verbose: true }), state = chessState(position, moves);
+  // `seen`: how often the position a move leads to has already stood on the board.
+  const seen = chessSeen(position);
+  const rated = moves.map((move) => ({ move, exact: chessExact(position, move), win: null, seen: chessAfter(position, move, seen) }));
+  if (show) { $("sees").textContent = JSON.stringify(state, null, 1); showRated(rated, null); }
+  const playable = chessCandidates(rated);
+  for (const item of rated) {
+    if (item.exact !== null) { item.win = item.exact; continue; }
+    if (!playable.includes(item)) continue;        // it would repeat a position a third time: not played, so not asked about
+    if (show) { considering = item.move; draw(); }
+    item.win = await rate(position, state, item.move, playing);
+    if (show) { showRated(rated, null); showStats(); }
+  }
+  return rated;
+}
+
+// Laya's move in the current position.
+async function think(playing) {
+  const rated = await rateAll(game, playing, true);
+  if ($("look").value === "2" && !rated.some((item) => item.exact === 1)) {
+    // A second look at its three best: what is the best reply to each worth to the opponent?
+    const best = chessCandidates(rated).filter((item) => item.exact === null).sort((a, b) => chessWorth(b) - chessWorth(a)).slice(0, 3);
+    for (const item of best) {
+      considering = item.move; draw();
+      game.move(item.move);
+      const replies = await rateAll(game, playing, false).finally(() => game.undo());
+      item.second = (item.win + (1 - Math.max(...replies.filter((reply) => reply.win !== null).map((reply) => reply.win)))) / 2;
+      showRated(rated, null);
+    }
+  }
+  // The best of the moves that do not repeat a position for the third time, each marked down
+  // if it goes back into an earlier one.
+  const playable = chessCandidates(rated), top = Math.max(...playable.map(chessWorth));
+  let choices = playable.filter((item) => chessWorth(item) === top);
+  // Two Layas would otherwise play the same game every time: in the opening, any move within
+  // two points of the best may be played.
+  if (game.history().length < 8) choices = playable.filter((item) => chessWorth(item) >= top - 0.02);
+  const chosen = choices[Math.floor(Math.random() * choices.length)];
+  // What Laya thinks of the game now: the win chance of the move it plays, seen from White's side.
+  const mine = chosen.second ?? chosen.win;
+  estimates.push({ ply: game.history().length + 1, san: chosen.move.san, white: game.turn() === "w" ? mine : 1 - mine });
+  considering = null;
+  showRated(rated, chosen);
+  return chosen.move;
+}
+
+// A language model's move: it is given the position, the game so far and the legal moves, and
+// asked for one of them by name.
+async function llmMove(playing) {
+  const moves = game.moves({ verbose: true }), side = game.turn() === "w" ? "white" : "black";
+  considering = null; draw();
+  const reply = await llm.ask(`You are playing chess as ${side}. Answer with only your move, written exactly as in the list of legal moves.`,
+    `Position (FEN): ${game.fen()}\nMoves so far: ${game.pgn() || "none"}\nLegal moves: ${moves.map((move) => move.san).join(", ")}\nYour move as ${side}?`, 12);
+  if (playing !== round) throw new Stale();
+  const bare = (san) => san.replace(/[+#]$/, "");
+  let move = null;
+  for (const word of reply.text.replace(/[.,;:!?"'`*()]/g, " ").split(/\s+/)) {
+    move = moves.find((m) => bare(m.san) === bare(word) || m.from + m.to + (m.promotion || "") === word.toLowerCase());
+    if (move) break;
+  }
+  const legal = Boolean(move);
+  if (!move) move = moves[Math.floor(Math.random() * moves.length)];
+  llm.played(reply, move.san, legal);
+  return move;
+}
+const NAMES = { you: "you", laya: "Laya", llm: "the LLM" };
+// Any loaded model can take a colour, so two different models can play each other.
+const seatOf = (colour) => $(colour === "w" ? "white" : "black");
+const mover = () => picker.seatModel(seatOf(game.turn()));
+const nameOf = (colour) => seats[colour] === "laya" ? picker.short(picker.seatModel(seatOf(colour))) : NAMES[seats[colour]];
+// Laya needs its model on the MLA; a game without Laya in it does not.
+const ready = () => (seats.w !== "laya" && seats.b !== "laya") || picker.ready;
+
+function showRated(rated, chosen) {
+  const playable = chessCandidates(rated), done = rated.filter((item) => item.win !== null);
+  const left = rated.length - playable.length;
+  $("ratedNote").textContent = `${done.length} of ${playable.length} moves rated` + (left ? `, ${left} left out for repeating` : "")
+    + (chosen ? `, ${chosen.move.san} played` : "");
+  const rows = [...done].sort((a, b) => chessWorth(b) - chessWorth(a)).slice(0, 10);
+  $("options").replaceChildren(...rows.map((item) => {
+    const row = document.createElement("div"), worth = chessWorth(item);
+    row.className = "option" + (chosen === item ? " top" : "") + (item.exact !== null ? " exact" : "");
+    row.innerHTML = '<span class="name"></span><span class="track"><i></i></span><span class="pct"></span>';
+    row.querySelector(".name").textContent = item.move.san;
+    row.querySelector("i").style.width = (Math.max(0, worth) * 100).toFixed(1) + "%";
+    row.querySelector(".pct").textContent = item.exact === 1 ? "mate" : item.exact === 0.5 ? "draw" : (worth * 100).toFixed(1) + "%";
+    row.title = [item.second !== undefined ? `first look ${(item.win * 100).toFixed(1)}%, after the best reply ${(item.second * 100).toFixed(1)}%` : "",
+                 item.seen && item.exact === null ? `marked down ${CHESS_REPEAT_PENALTY * 100} points: the game has been in that position before` : ""].filter(Boolean).join("; ");
+    if (item.seen && item.exact === null) row.querySelector(".name").append(Object.assign(document.createElement("small"), { textContent: " again" }));
+    return row;
+  }));
+}
+
+const squares = [];
+function buildBoard() {
+  const flipped = seats.w !== "you" && seats.b === "you";       // you play black only: black at the bottom
+  $("board").replaceChildren(); squares.length = 0;
+  for (let row = 0; row < 8; row++) for (let col = 0; col < 8; col++) {
+    const file = flipped ? 7 - col : col, rank = flipped ? row + 1 : 8 - row;
+    const name = CHESS_FILES[file] + rank;
+    const cell = Object.assign(document.createElement("div"), { className: (file + rank) % 2 ? "" : "dark" });
+    cell.dataset.square = name;
+    cell.onclick = () => clicked(name);
+    squares.push(cell);
+    $("board").append(cell);
+  }
+}
+
+function draw() {
+  const turn = game.turn(), human = seats[turn] === "you" && !game.game_over();
+  const targets = picked ? game.moves({ square: picked, verbose: true }) : [];
+  const kingInCheck = game.in_check() ? game.board().flat().find((p) => p && p.type === "k" && p.color === turn) : null;
+  for (const cell of squares) {
+    const name = cell.dataset.square, piece = game.get(name);
+    const target = targets.find((move) => move.to === name);
+    cell.className = ((CHESS_FILES.indexOf(name[0]) + Number(name[1])) % 2 ? "" : "dark")
+      + (lastMove && (lastMove.from === name || lastMove.to === name) ? " last" : "")
+      + (considering && (considering.from === name || considering.to === name) ? " thinking" : "")
+      + (picked === name ? " picked" : "") + (target ? " target" + (target.captured ? " capture" : "") : "")
+      + (human && piece && piece.color === turn ? " mine" : "")
+      + (kingInCheck && piece && piece.type === "k" && piece.color === turn ? " check" : "");
+    cell.replaceChildren();
+    if (piece) cell.append(Object.assign(document.createElement("span"), { className: piece.color, textContent: GLYPH[piece.type] + "︎" }));
+    // File letters along the bottom row, rank numbers down the left column, whichever way the board faces.
+    if (cell.dataset.square[1] === squares[56].dataset.square[1]) cell.append(Object.assign(document.createElement("small"), { className: "file", textContent: name[0] }));
+    if (cell.dataset.square[0] === squares[0].dataset.square[0]) cell.append(Object.assign(document.createElement("small"), { className: "rank", textContent: name[1] }));
+  }
+  const history = game.history();
+  // Each move with how long it took, where a model or a language model made it.
+  const took = Object.fromEntries(timings.map((t) => [t.ply, t]));
+  $("moves").replaceChildren(...history.flatMap((san, i) => {
+    const t = took[i + 1], time = t ? Object.assign(document.createElement("small"), { textContent: seconds(t.ms),
+      title: `${t.who}: ${seconds(t.ms)} for this move` + (t.decisions ? `, ${t.decisions} decisions, ${Math.round(t.mla)} ms of it on the MLA` : "") }) : "";
+    return [i % 2 === 0 ? `${i / 2 + 1}. ` : "", Object.assign(document.createElement("b"), { textContent: san }), time, " "];
+  }));
+  showLatency();
+  if (!history.length) $("moves").textContent = "No moves yet.";
+  $("moves").scrollTop = $("moves").scrollHeight;
+  $("moveNo").textContent = Math.floor(history.length / 2) + 1;
+  $("record").textContent = `${record.w} / ${record.d} / ${record.b}`;
+  const result = chessResult(game), side = turn === "w" ? "White" : "Black";
+  $("status").classList.toggle("over", Boolean(result));
+  $("status").textContent = result ? (result.winner ? `${result.winner === "w" ? "White" : "Black"} wins by ${result.how}` : `Drawn by ${result.how}`)
+    : !picker.ready && seats[turn] === "laya" ? "No model is on the MLA. Load Laya-chess in Settings."
+    : seats[turn] === "you" ? `${side} to move: yours` + (game.in_check() ? ", and you are in check" : "")
+    : !auto ? `${side} to move: ${nameOf(turn)}, paused`
+    : seats[turn] === "laya" ? `${side} to move: ${nameOf(turn)} is rating the moves` : `${side} to move: the LLM is writing its move`;
+  $("undo").disabled = !history.length;
+  showScore();                           // the score is part of the picture
+}
+
+function showStats() {
+  $("count").textContent = stats.decisions.toLocaleString();
+  if (recent.length) {
+    const mean = (key) => recent.reduce((sum, r) => sum + r[key], 0) / recent.length;
+    $("mlaMs").textContent = mean("mla").toFixed(1);
+    $("trip").textContent = mean("trip").toFixed(0) + " ms";
+    $("rate").textContent = recent.filter((r) => performance.now() - r.at < 1000).length;
+  }
+}
+
+// Latency per move: what each side's last move took, and its average over the game so far.
+// The time is all of it, as the other player waits; for a model, the part spent on the MLA is
+// beside it, and how many decisions the move was (one per legal move, more with a second look).
+const seconds = (ms) => ms < 995 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 9950 ? 2 : 1)} s`;
+function showLatency() {
+  const average = {};
+  for (const [colour, key] of [["w", "W"], ["b", "B"]]) {
+    const mine = timings.filter((t) => t.colour === colour), last = mine[mine.length - 1];
+    const mean = (pick) => mine.reduce((sum, t) => sum + pick(t), 0) / mine.length;
+    const cell = (ms, mla) => [Object.assign(document.createElement("b"), { textContent: seconds(ms) }), mla === null ? "" : ` \u00b7 ${seconds(mla)} on the MLA`];
+    const kind = seats[colour];
+    $("latWho" + key).replaceChildren(colour === "w" ? "White" : "Black", Object.assign(document.createElement("small"), { textContent: kind === "you" ? "you" : nameOf(colour) }));
+    $("latLast" + key).replaceChildren(...(last ? cell(last.ms, last.mla) : [kind === "you" ? "not timed" : "\u2013"]));
+    $("latMean" + key).replaceChildren(...(last ? [...cell(mean((t) => t.ms), last.mla === null ? null : mean((t) => t.mla || 0)), ` \u00b7 ${mine.length} move${mine.length === 1 ? "" : "s"}`] : ["\u2013"]));
+    $("latCount" + key).textContent = last && last.decisions !== null ? `${last.decisions} last \u00b7 ${mean((t) => t.decisions || 0).toFixed(0)} average` : "\u2013";
+    if (last) average[colour] = mean((t) => t.ms);
+  }
+  const { w, b } = average;
+  $("latencyNote").textContent = w === undefined && b === undefined ? "No model has moved yet"
+    : w === undefined || b === undefined ? `Only ${w === undefined ? "Black" : "White"} is timed: the other side is a person`
+    : Math.max(w, b) / Math.min(w, b) < 1.1 ? "The two sides take about as long"
+    : `${w < b ? "White" : "Black"} moves ${(Math.max(w, b) / Math.min(w, b)).toFixed(1)}\u00d7 faster than ${w < b ? "Black" : "White"}`;
+}
+
+// The live score: who is ahead by Laya's estimate, and by the pieces left on the board.
+const WORTH = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+function showScore() {
+  const points = { w: 0, b: 0 };
+  for (const piece of game.board().flat()) if (piece) points[piece.color] += WORTH[piece.type];
+  $("matWhite").textContent = points.w; $("matBlack").textContent = points.b;
+  $("matFill").style.width = (points.w + points.b ? points.w / (points.w + points.b) * 100 : 50).toFixed(1) + "%";
+  const gap = points.w - points.b, last = estimates[estimates.length - 1], result = chessResult(game);
+  $("estWhite").textContent = last ? (last.white * 100).toFixed(0) + "%" : "\u2013";
+  $("estBlack").textContent = last ? ((1 - last.white) * 100).toFixed(0) + "%" : "\u2013";
+  $("estFill").style.width = ((last ? last.white : 0.5) * 100).toFixed(1) + "%";
+  $("scoreNote").textContent = last ? `after ${Math.ceil(last.ply / 2)}${last.ply % 2 ? "." : "\u2026"} ${last.san}` : "Laya has not moved yet";
+  // The trace: White's estimated win chance at each of Laya's moves, across the game so far.
+  const span = Math.max(20, game.history().length);
+  $("scoreLine").setAttribute("points", estimates.map((e) => `${(e.ply / span * 300).toFixed(1)},${(42 - e.white * 40).toFixed(1)}`).join(" "));
+  const material = gap ? `${gap > 0 ? "White" : "Black"} is up ${Math.abs(gap)} in material` : "material is level";
+  const side = (share) => share >= 0.5 ? "White" : "Black";
+  $("lead").textContent = result ? (result.winner ? `${result.winner === "w" ? "White" : "Black"} won` : "Drawn")
+    : !last ? material[0].toUpperCase() + material.slice(1)
+    : Math.abs(last.white - 0.5) < 0.03 ? `Even by Laya's estimate; ${material}`
+    : `${side(last.white)} is ahead: ${(Math.max(last.white, 1 - last.white) * 100).toFixed(0)}% by Laya's estimate; ${material}`;
+}
+
+function played(move) {
+  lastMove = move; picked = null; considering = null;
+  const result = chessResult(game);
+  if (result && !counted) { counted = true; record[result.winner || "d"]++; }
+  draw();
+}
+
+
+// A human's click: pick one of your pieces, then one of its marked squares.
+function clicked(name) {
+  const turn = game.turn();
+  if (game.game_over() || seats[turn] !== "you") return;
+  const move = picked && game.moves({ square: picked, verbose: true }).find((m) => m.to === name && (!m.promotion || m.promotion === "q"));
+  if (move) { played(game.move(move)); loop(); return; }
+  const piece = game.get(name);
+  picked = piece && piece.color === turn && picked !== name ? name : null;
+  draw();
+}
+
+// Laya moves whenever it is its turn; two Layas play each other until the game ends.
+async function loop() {
+  if (busy) return;
+  busy = true;
+  while (auto && ready() && !game.game_over() && seats[game.turn()] !== "you") {
+    const playing = round, who = seats[game.turn()];
+    draw();
+    let move;
+    const started = performance.now(), before = stats.decisions, colour = game.turn(), mover = nameOf(colour);
+    moveMla = 0;
+    try { move = who === "laya" ? await think(playing) : await llmMove(playing); } catch (error) {
+      if (error instanceof Stale) continue;
+      if (error instanceof NotLoaded) { picker.lost(); break; }
+      $("error").hidden = false; $("error").textContent = error.message;
+      setAuto(false);
+      break;
+    }
+    if (playing !== round) continue;
+    timings.push({ ply: game.history().length + 1, colour, who: mover, ms: performance.now() - started,
+                   mla: who === "laya" ? moveMla : null, decisions: who === "laya" ? stats.decisions - before : null });
+    played(game.move(move));
+    showStats();
+    if (seats.w !== "you" && seats.b !== "you") await sleep(350);       // long enough to see each move land
+  }
+  busy = false;
+  draw();
+  // Two Layas start again by themselves, as the other games do.
+  if (auto && ready() && game.game_over() && seats.w !== "you" && seats.b !== "you") {
+    const finished = round;
+    await sleep(4000);
+    if (finished === round && auto && game.game_over()) newGame();
+  }
+}
+
+function newGame() {
+  round++;
+  game.reset();
+  picked = considering = lastMove = null; counted = false;
+  estimates = []; timings = [];
+  $("error").hidden = true;
+  $("options").replaceChildren(); $("ratedNote").textContent = " "; $("asked").textContent = " "; $("sees").textContent = "–";
+  buildBoard(); draw();
+  loop();
+}
+
+function setAuto(value) {
+  auto = value;
+  $("auto").textContent = auto ? "Pause" : "Resume";
+  $("auto").classList.toggle("primary", !auto);
+  draw();
+  if (auto) loop();
+}
+
+$("auto").onclick = () => setAuto(!auto);
+$("restart").onclick = newGame;
+$("resetScores").onclick = () => { record = { w: 0, d: 0, b: 0 }; stats.decisions = 0; recent.length = 0; draw(); showStats(); };
+// Taking back returns to your own previous turn: your move and Laya's reply, or just yours.
+$("undo").onclick = () => {
+  round++;
+  game.undo();
+  if (seats[game.turn()] !== "you" && (seats.w === "you" || seats.b === "you")) game.undo();
+  picked = considering = null; counted = false;
+  estimates = estimates.filter((e) => e.ply <= game.history().length);       // what was taken back is forgotten
+  timings = timings.filter((t) => t.ply <= game.history().length);
+  const history = game.history({ verbose: true });
+  lastMove = history[history.length - 1] || null;
+  draw();
+  loop();
+};
+for (const [id, colour] of [["white", "w"], ["black", "b"]]) {
+  $(id).value = seats[colour];
+  $(id).onchange = () => {
+    seats[colour] = $(id).value;
+    try { localStorage.setItem("laya.chess.seats", JSON.stringify(seats)); } catch (_) { /* not kept */ }
+    round++;                                   // whatever Laya was rating belongs to the old seating
+    picked = considering = null;
+    llm.reset(); llm.show(seats.w === "llm" || seats.b === "llm");
+    buildBoard(); draw();
+    loop();
+  };
+}
+$("look").onchange = () => { $("lookNote").textContent = LOOK_NOTES[$("look").value] + REPEAT_NOTE; };
+$("lookNote").textContent = LOOK_NOTES[$("look").value] + REPEAT_NOTE;
+
+const llm = createLLMPlayer(document.querySelectorAll("main > section")[1]);
+llm.show(seats.w === "llm" || seats.b === "llm");
+const picker = createModelPicker({ mount: $("picker"), madeFor: "chess", onReady: (loaded) => { draw(); if (loaded) loop(); else round++; } });
+picker.seats($("white"), $("black"));
+buildBoard(); draw(); showStats();
+loop();
+</script>
+</body>
+</html>

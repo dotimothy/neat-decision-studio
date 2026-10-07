@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
+<link rel="stylesheet" href="/static/neat.css">
+<style>
+  /* The showcase: the story of the demo as a deck of slides, in the format of Neat GenAI
+     Studio's showcase (one slide at a time, arrows or keys to move, a slideshow that advances
+     by itself). The first screen of the app is the plain landing page; this is for presenting.
+     Colours and fonts come from neat.css; the deck brings its own bar instead of the app's. */
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; color: var(--ink); font-size: 16px; overflow: hidden; display: block; }
+  a { color: var(--accent-strong); }
+  .grad { background: var(--spectrum); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text;
+          -webkit-text-fill-color: transparent; animation: sweep 6s ease-in-out infinite alternate; }
+  @keyframes sweep { to { background-position: 100% 0; } }
+  @keyframes float { 50% { transform: translateY(-9px); } }
+  @property --turn { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+  @keyframes turn { to { --turn: 360deg; } }
+  @keyframes swap { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(60px, 34px) scale(1.18); } }
+
+  /* The bar: brand, where in the deck, the controls, and the way into the app. */
+  .progress { position: fixed; inset: 0 0 auto 0; height: 3px; z-index: 30; background: color-mix(in srgb, var(--line) 60%, transparent); }
+  .progress i { display: block; height: 100%; width: 0; background: var(--spectrum); transition: width .45s ease; }
+  body::before { display: none; }
+  .topbar { position: fixed; inset: 3px 0 auto 0; height: 56px; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 14px;
+            padding: 0 22px; background: color-mix(in srgb, var(--panel) 82%, transparent); backdrop-filter: saturate(140%) blur(8px);
+            border-bottom: 1px solid var(--line); }
+  .topbar .brand { display: flex; align-items: center; gap: 11px; text-decoration: none; color: var(--ink); font-weight: 600; letter-spacing: -.01em; }
+  .topbar .brand > img { height: 34px; border-radius: 8px; }
+  .topbar .brand small { display: block; font-size: 11px; font-weight: 400; color: var(--faint); letter-spacing: .02em; }
+  .controls { display: flex; align-items: center; gap: 8px; }
+  .controls button, .controls select { font: inherit; font-size: 13.5px; color: var(--ink); background: var(--chip); border: 1px solid var(--line); border-radius: 999px;
+                     padding: 6px 13px; cursor: pointer; min-width: 0; }
+  .controls button:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent-strong); }
+  .controls button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .controls .icon { width: 34px; padding: 6px 0; }
+  .counter { font: 13px var(--mono); color: var(--muted); min-width: 62px; text-align: center; }
+  .counter b { color: var(--ink); }
+  .launch { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; font-weight: 600; font-size: 14px; padding: 8px 16px; border-radius: 999px;
+            background: var(--accent); color: var(--accent-ink); }
+  .launch:hover { background: var(--accent-strong); color: var(--accent-ink); }
+  @media (max-width: 760px) { .controls select, .topbar .brand small, .launch span.long { display: none; } }
+
+  /* The deck: every slide fills the window below the bar; one is shown. */
+  .deck { position: fixed; inset: 59px 0 0 0; }
+  .slide { position: absolute; inset: 0; overflow-y: auto; display: flex; padding: 28px 24px 44px;
+           opacity: 0; visibility: hidden; transform: translateY(18px); transition: opacity .5s ease, transform .5s cubic-bezier(.2, .7, .2, 1), visibility 0s .5s; }
+  .slide.is-active { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+  .wrap { width: 100%; max-width: 1180px; margin: auto; }       /* centred when it fits, from the top when it does not */
+  .eyebrow { display: block; font-size: 12.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-strong); margin-bottom: 12px; }
+  .slide h1 { margin: 0; font-size: clamp(36px, 5.4vw, 64px); line-height: 1.05; letter-spacing: -.035em; }
+  .slide h2 { margin: 0; font-size: clamp(26px, 3.6vw, 42px); line-height: 1.12; letter-spacing: -.03em; color: var(--ink); text-transform: none; font-weight: 700; }
+  .lede { margin: 16px 0 0; font-size: clamp(16px, 1.5vw, 19px); color: var(--muted); max-width: 64ch; }
+  /* What is on a slide arrives in order when the slide is shown. */
+  .slide :is(.r1, .r2, .r3, .r4, .r5) { opacity: 0; transform: translateY(16px); transition: opacity .6s ease, transform .6s cubic-bezier(.2, .7, .2, 1); }
+  .slide.is-active :is(.r1, .r2, .r3, .r4, .r5) { opacity: 1; transform: none; }
+  .slide.is-active .r1 { transition-delay: .08s; } .slide.is-active .r2 { transition-delay: .18s; } .slide.is-active .r3 { transition-delay: .3s; }
+  .slide.is-active .r4 { transition-delay: .44s; } .slide.is-active .r5 { transition-delay: .58s; }
+
+  .split { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); gap: 40px; align-items: center; }
+  @media (max-width: 900px) { .split { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
+  .cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px; border-radius: 999px; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer;
+         color: var(--ink); background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
+  .btn:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent-strong); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { background: var(--accent-strong); color: var(--accent-ink); }
+  .builton { display: flex; align-items: center; gap: 12px; margin-top: 22px; color: var(--muted); font-size: 14px; }
+  .builton .sima { height: 22px; width: auto; }
+  .builton .on-dark { display: none; }
+  @media (prefers-color-scheme: dark) { .builton .on-dark { display: inline; } .builton .on-light { display: none; } }
+  .builton .neat-name { color: var(--ink); font-size: 15px; }
+  .statstrip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 28px; max-width: 560px; }
+  .statstrip .num { font-size: clamp(24px, 2.6vw, 34px); font-weight: 700; letter-spacing: -.03em; }
+  .statstrip .lbl { color: var(--muted); font-size: 13px; }
+  .glow { position: absolute; z-index: -1; width: 560px; height: 560px; border-radius: 50%; pointer-events: none; opacity: .5; top: -140px; left: -160px;
+          background: radial-gradient(circle, color-mix(in srgb, #16c8a6 32%, transparent), transparent 66%); animation: drift 14s ease-in-out infinite alternate; }
+  .glow.b { left: auto; right: -200px; top: 20px; background: radial-gradient(circle, color-mix(in srgb, #3a86ec 28%, transparent), transparent 66%); animation-duration: 18s; }
+
+  /* A decision made on this board while the slide is up. */
+  .live { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-md); padding: 18px 20px 16px;
+          animation: float 7s ease-in-out infinite; }
+  .live::before { content: ""; position: absolute; inset: -2px; border-radius: calc(var(--radius) + 2px); padding: 2px; pointer-events: none; opacity: .75;
+                  background: conic-gradient(from var(--turn), #16c8a6, #4bb54a, #a9c81c, #3a86ec, #f2801d, #16c8a6);
+                  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+                  animation: turn 6s linear infinite; }
+  .live-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12px; font-weight: 600; letter-spacing: .08em;
+               text-transform: uppercase; color: var(--faint); }
+  .live-head i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: 7px; }
+  .live-head i.off { background: var(--faint); }
+  .live-state { margin: 16px 0 6px; font-size: 19px; font-weight: 600; letter-spacing: -.012em; line-height: 1.35; min-height: 2.7em; }
+  .live-state::before { content: "\201C"; } .live-state::after { content: "\201D"; }
+  .live-state.none::before, .live-state.none::after { content: ""; }
+  .live-ask { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+  #liveRows { min-height: 84px; }
+  .live-row { display: grid; grid-template-columns: 78px minmax(0, 1fr) 58px; gap: 10px; align-items: center; margin-top: 8px; font-size: 14px; color: var(--muted); animation: swap .4s ease-out both; }
+  .live-row .track { height: 12px; border-radius: 999px; background: var(--track); overflow: hidden; }
+  .live-row .track i { display: block; height: 100%; border-radius: 999px; background: var(--faint); transition: width .45s ease; }
+  .live-row b { text-align: right; font-variant-numeric: tabular-nums; font-weight: 400; }
+  .live-row.top { color: var(--ink); font-weight: 650; } .live-row.top .track i { background: var(--accent); } .live-row.top b { font-weight: 700; }
+  .live-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 14px; margin-top: 16px; padding-top: 12px;
+               border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
+  .live-foot .ms { font-size: 26px; font-weight: 700; letter-spacing: -.02em; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .live-foot .ms small { font-size: 13.5px; font-weight: 400; color: var(--muted); margin-left: 6px; }
+  .swap { animation: swap .45s ease-out both; }
+
+  /* Cards, in rows that always hold the same number. */
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 26px; }
+  .cards.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 900px) { .cards { grid-template-columns: minmax(0, 1fr); } .cards.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 560px) { .cards.four { grid-template-columns: minmax(0, 1fr); } }
+  .card { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 18px;
+          text-decoration: none; color: var(--ink); font-family: inherit; transition: .16s ease; }
+  a.card:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+  .card .tag { font-size: 11.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--accent-strong); }
+  .card h3 { margin: 6px 0 6px; font-size: 18px; letter-spacing: -.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .card pre { margin: 12px 0 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--field); border: 1px solid var(--line);
+              font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .card code { font: 13px var(--mono); background: var(--chip); border-radius: 6px; padding: 2px 7px; }
+  .card.chip { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 10px; align-items: center; }
+  .card.chip img { width: 96px; filter: drop-shadow(0 6px 14px color-mix(in srgb, var(--accent) 30%, transparent)); animation: float 5s ease-in-out infinite; }
+  .bars { margin-top: 12px; display: grid; gap: 6px; font: 12.5px var(--mono); }
+  .bars div { display: grid; grid-template-columns: 74px minmax(0, 1fr) 46px; gap: 8px; align-items: center; }
+  .bars u { display: block; height: 8px; border-radius: 999px; background: var(--track); overflow: hidden; text-decoration: none; }
+  .bars u i { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--accent); transition: width 1.1s .7s cubic-bezier(.2, .7, .2, 1); }
+  .slide.is-active .bars u i { width: var(--w); }
+  .bars span:last-child { text-align: right; color: var(--muted); }
+
+  .table { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+           box-shadow: var(--shadow-sm); overflow: hidden; font-size: 14.5px; margin-top: 24px; }
+  .table th { text-align: left; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); padding: 12px 16px 8px; }
+  .table td { padding: 9px 16px; border-top: 1px solid var(--line); vertical-align: top; }
+  .table td b { display: block; } .table td span.about { display: none; }
+  .table td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pill { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; border: 1px solid currentColor; white-space: nowrap; }
+  .pill.loaded { color: var(--good); } .pill.board { color: var(--accent-strong); } .pill.remote { color: var(--faint); }
+  @media (max-width: 760px) { .table .wide, .table td span.about { display: none; } }
+  .foot { margin-top: 22px; color: var(--muted); font-size: 14px; max-width: 80ch; }
+
+  /* Where in the deck: a dot per slide, down the side. */
+  .navdots { position: fixed; right: 14px; top: 50%; transform: translateY(-50%); z-index: 20; display: flex; flex-direction: column; gap: 9px; }
+  .navdots button { width: 9px; height: 9px; min-width: 0; padding: 0; border-radius: 50%; border: 0; background: var(--line); cursor: pointer; transition: .2s; }
+  .navdots button:hover { background: var(--muted); }
+  .navdots button.on { background: var(--accent); transform: scale(1.5); }
+  @media (max-width: 700px) { .navdots { display: none; } }
+  .hintkeys { position: fixed; left: 22px; bottom: 12px; z-index: 20; font-size: 12px; color: var(--faint); }
+  .hintkeys kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; background: var(--chip); color: var(--muted); }
+  @media (max-width: 700px) { .hintkeys { display: none; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .glow { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="progress" aria-hidden="true"><i id="prog"></i></div>
+<header class="topbar">
+  <a class="brand" href="/"><img src="/static/brand/neat-decision.svg" alt=""><span>Neat Decision Studio<small>Showcase &middot; running on <span class="neat-name"><img src="/static/brand/neat-mark.png" alt="">SiMa.ai Palette Neat</span></small></span></a>
+  <div class="controls">
+    <button class="icon" id="prev" title="Previous slide (&larr;)" aria-label="Previous slide">&lsaquo;</button>
+    <span class="counter"><b id="cnum">01</b> / <span id="ctotal">08</span></span>
+    <button class="icon" id="next" title="Next slide (&rarr;)" aria-label="Next slide">&rsaquo;</button>
+    <button id="play" title="Advance by itself (P)">Slideshow</button>
+    <select id="seconds" aria-label="Seconds per slide" title="Seconds per slide">
+      <option value="5">5 s a Slide</option><option value="10" selected>10 s a Slide</option><option value="20">20 s a Slide</option><option value="30">30 s a Slide</option>
+    </select>
+    <a class="launch" href="/"><span class="long">Launch the Studio</span><span class="go"></span></a>
+  </div>
+</header>
+
+<main class="deck" id="deck">
+
+  <!-- 1 · Hero -->
+  <section class="slide is-active" data-title="Neat Decision Studio">
+    <i class="glow"></i><i class="glow b"></i>
+    <div class="wrap split">
+      <div>
+        <span class="eyebrow r1">Powered by LLiMa &middot; Built with <span class="neat-name"><img src="/static/brand/neat-mark.png" alt="">Palette Neat</span></span>
+        <h1 class="r1">Decisions at Reflex Speed.<br><span class="grad">At the Edge.</span></h1>
+        <p class="lede r2">Laya is a System-1 decision model: it reads a piece of text and a typed question and returns a probability for every
+          option in a single forward pass. Here its 421 million parameters run <b>entirely on the Modalix MLA</b>. No cloud, no GPU.</p>
+        <div class="cta r3">
+          <a class="btn primary" href="/"><span class="go">Launch Neat Decision Studio</span></a>
+          <button class="btn" data-next>See How It Works</button>
+        </div>
+        <div class="builton r5">
+          <span>Built on</span>
+          <img class="sima on-light" src="/static/brand/sima-on-light.png" alt="SiMa.ai"><img class="sima on-dark" src="/static/brand/sima-on-dark.png" alt="SiMa.ai">
+          <span>&times;</span>
+          <strong class="neat-name"><img src="/static/brand/neat-mark.png" alt="">Palette Neat</strong>
+        </div>
+        <div class="statstrip r4">
+          <div><div class="num grad">19 ms</div><div class="lbl">per decision</div></div>
+          <div><div class="num">1</div><div class="lbl">MLA graph, 0 CPU layers</div></div>
+          <div><div class="num">0</div><div class="lbl">cloud calls</div></div>
+        </div>
+      </div>
+      <div class="live r3" aria-live="off">
+        <div class="live-head"><span><i id="liveDot" class="off"></i><span id="liveLabel">This board</span></span><span id="liveModel"></span></div>
+        <p class="live-state none" id="liveState">&nbsp;</p>
+        <p class="live-ask" id="liveAsk">&nbsp;</p>
+        <div id="liveRows"></div>
+        <div class="live-foot"><span class="ms"><span id="liveMs">&ndash;</span><small>ms on the MLA</small></span><span id="liveNote"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · The idea -->
+  <section class="slide" data-title="The Idea">
+    <div class="wrap">
+      <span class="eyebrow r1">The idea</span>
+      <h2 class="r2">A language model writes an answer. <span class="grad">A decision model picks one.</span></h2>
+      <p class="lede r3">A language model produces its answer token by token. A decision model scores the options it is given, all at once,
+        which is why it fits a reflex: routing, triage, gating an action, or every move of a game.</p>
+      <div class="cards r4">
+        <div class="card"><span class="tag">One pass</span><h3>No Text Generation</h3><p>The answer is a probability per option, read off a single forward pass of the encoder and its decision head.</p></div>
+        <div class="card"><span class="tag">Typed</span><h3>Choose, Score, Yes or No</h3><p>Three kinds of question, with your own options. The answer space is built for every request.</p></div>
+        <div class="card"><span class="tag">Reflex</span><h3>About 50 a Second</h3><p>At 19 ms a decision, one board answers a stream of questions, or plays a game in real time.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · How -->
+  <section class="slide" data-title="How a Decision Is Made">
+    <div class="wrap">
+      <span class="eyebrow r1">How it works</span>
+      <h2 class="r2">One forward pass, <span class="grad">one decision.</span></h2>
+      <div class="cards r3">
+        <div class="card"><span class="tag">01 &middot; State and question</span><h3>Say What to Decide</h3>
+          <p>Any text or JSON, and a question with its options.</p>
+          <pre>"We were billed twice for March."
+Which department? billing / technical / other</pre></div>
+        <div class="card chip"><div><span class="tag">02 &middot; On the MLA</span><h3>One Pass, on the Chip</h3>
+          <p>The whole encoder and decision head run as a single graph on the Modalix MLA. Only the tokenizer and a table lookup stay on the CPU.</p></div>
+          <img src="/static/brand/modalix.svg" alt="The SiMa.ai Modalix MLSoC"></div>
+        <div class="card"><span class="tag">03 &middot; Probabilities</span><h3>Read the Answer</h3>
+          <p>A probability for each option, and how sure the model is that it should act.</p>
+          <div class="bars">
+            <div><span>billing</span><u><i style="--w:98.9%"></i></u><span>98.9%</span></div>
+            <div><span>technical</span><u><i style="--w:0.7%"></i></u><span>0.7%</span></div>
+            <div><span>other</span><u><i style="--w:0.5%"></i></u><span>0.5%</span></div>
+          </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · Measured -->
+  <section class="slide" data-title="Measured on Modalix">
+    <div class="wrap">
+      <span class="eyebrow r1">Measured on a Modalix DevKit</span>
+      <h2 class="r2">The models, <span class="grad">on real silicon.</span></h2>
+      <p class="lede r3">Latency is one decision inside the runtime, on each model's shortest graph. Every graph is a single MLA stage.</p>
+      <table class="table r4">
+        <thead><tr><th>Model</th><th class="wide">Encoder</th><th class="wide">Languages</th><th>Per decision</th><th>Where</th></tr></thead>
+        <tbody id="modelRows"><tr><td colspan="5" style="color:var(--muted)">Reading the list&hellip;</td></tr></tbody>
+      </table>
+      <p class="foot r5">The compiled models are on <a href="https://huggingface.co/TDoSiMa/sima-laya" target="_blank" rel="noopener">Hugging Face</a>;
+        Settings downloads one to the board and loads it on the MLA, beside the ones already there. Against the PyTorch originals, the general model gives the same decision in 100 of 100 cases.</p>
+    </div>
+  </section>
+
+  <!-- 5 · The studio -->
+  <section class="slide" data-title="The Studio">
+    <div class="wrap">
+      <span class="eyebrow r1">The studio</span>
+      <h2 class="r2">Four ways in, <span class="grad">and a terminal.</span></h2>
+      <div class="cards four r3">
+        <a class="card" href="/debate"><span class="tag">Live</span><h3>Debate</h3><p>Type a yes-or-no question. The answer and its pie chart follow every keystroke.</p></a>
+        <a class="card" href="/questions"><span class="tag">Your own</span><h3>Questions</h3><p>Your text, your questions, your options: route a ticket, score its urgency, gate an action.</p></a>
+        <a class="card" href="/games"><span class="tag">Play</span><h3>Games</h3><p>Seven games it plays in real time, with a person in them or against a language model.</p></a>
+        <a class="card" href="/compare"><span class="tag">Side by Side</span><h3>Compare</h3><p>Load several models at once and ask them all the same thing: who agrees, who differs, how fast.</p></a>
+      </div>
+      <p class="foot r4">Without a browser: <code style="font:13.5px var(--mono); background:var(--chip); border-radius:6px; padding:2px 7px">neat-decision --cli</code>
+        is the same demo as a prompt on the board, answering at every keystroke.</p>
+    </div>
+  </section>
+
+  <!-- 6 · Games -->
+  <section class="slide" data-title="Seven Games">
+    <div class="wrap">
+      <span class="eyebrow r1">Games</span>
+      <h2 class="r2">Every move is <span class="grad">a decision on the chip.</span></h2>
+      <div class="cards four r3">
+        <a class="card" href="/games/snake"><span class="tag">Game</span><h3>Snake</h3><p>One decision per move, on any grid, with as much sight as you give it. Race it.</p></a>
+        <a class="card" href="/games/chess"><span class="tag">Game</span><h3>Chess</h3><p>It rates every legal move, about thirty decisions a second.</p></a>
+        <a class="card" href="/games/tictactoe"><span class="tag">Game</span><h3>Tic-Tac-Toe</h3><p>One decision a move. Looking to the end of the game, it does not lose.</p></a>
+        <a class="card" href="/games/rps"><span class="tag">Game</span><h3>Rock Paper Scissors</h3><p>It reads your last throws and says what you will throw next.</p></a>
+        <a class="card" href="/games/dino"><span class="tag">Game</span><h3>Dino Arena</h3><p>Run, jump or duck about 45 times a second. Race it yourself.</p></a>
+        <a class="card" href="/games/blackjack"><span class="tag">Game</span><h3>Blackjack</h3><p>Bets, doubles, hits and stands, remembering the cards. Sit down beside it.</p></a>
+        <a class="card" href="/games/sudoku"><span class="tag">Game</span><h3>Sudoku</h3><p>Which cell, then which digit: two decisions a cell. Take turns with it.</p></a>
+        <a class="card" href="/games/tictactoe"><span class="tag">Match</span><h3>Laya Against an LLM</h3><p>In three of the games the other side can be a language model.</p></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 · Against an LLM -->
+  <section class="slide" data-title="System 1 Against System 2">
+    <div class="wrap">
+      <span class="eyebrow r1">Two kinds of model, one chip</span>
+      <h2 class="r2">System 1 against <span class="grad">System 2.</span></h2>
+      <p class="lede r3">In Chess, Tic-Tac-Toe and Rock Paper Scissors the other side can be a language model served by Neat GenAI Studio
+        on the same board. Both models are on the MLA at once; one answers in milliseconds, the other in words.</p>
+      <div class="cards r4">
+        <div class="card"><span class="tag">Laya</span><h3>35 ms a Decision</h3><p>The chess model rates each legal move in one pass: about thirty decisions, a second a move.</p></div>
+        <div class="card"><span class="tag">Gemma 4 E2B</span><h3>0.3 s a Move</h3><p>The language model is given the position and the legal moves, and writes its move.</p></div>
+        <div class="card"><span class="tag">Rock Paper Scissors</span><h3>16 of 17</h3><p>Against a small language model that threw rock every round, Laya read the habit and won 16 rounds of 17.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 · Built with -->
+  <section class="slide" data-title="Built with Palette Neat">
+    <div class="wrap">
+      <span class="eyebrow r1">How it was made</span>
+      <h2 class="r2">Built with <span class="neat-name"><img src="/static/brand/neat-mark.png" alt=""><span class="grad">SiMa.ai Palette Neat.</span></span></h2>
+      <div class="cards r3">
+        <div class="card"><span class="tag">Compile</span><h3>One Graph per Length</h3><p>The checkpoints are built on the LLiMa compiler framework into a single MLA graph for each sequence length.</p></div>
+        <div class="card"><span class="tag">Run</span><h3>A Small C++ Runtime</h3><p>Tokenizing and a table lookup on the CPU, everything else on the MLA, behind one JSON line per request.</p></div>
+        <div class="card"><span class="tag">Show</span><h3>This Studio</h3><p>A web app in the Python standard library, a terminal prompt, and compiled models on Hugging Face.</p></div>
+      </div>
+      <div class="cta r4">
+        <a class="btn primary" href="/"><span class="go">Launch Neat Decision Studio</span></a>
+        <a class="btn" href="https://github.com/dotimothy/neat-decision-studio" target="_blank" rel="noopener">The Code</a>
+        <a class="btn" href="https://huggingface.co/TDoSiMa/sima-laya" target="_blank" rel="noopener">The Models</a>
+      </div>
+      <p class="foot r5">The models are Convai Innovations' <a href="https://github.com/NandhaKishorM/laya" target="_blank" rel="noopener">Laya</a> checkpoints
+        (Apache-2.0); the chess model is <a href="https://huggingface.co/datafreak/laya-chess" target="_blank" rel="noopener">LayaChess</a>.</p>
+    </div>
+  </section>
+</main>
+
+<nav class="navdots" id="dots" aria-label="Slides"></nav>
+<div class="hintkeys"><kbd>&larr;</kbd> <kbd>&rarr;</kbd> move &middot; <kbd>P</kbd> slideshow &middot; <kbd>F</kbd> full screen</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const slides = [...document.querySelectorAll(".slide")];
+let at = 0, timer = null;
+
+// ---- The deck: one slide at a time, by button, key, dot or swipe; the address remembers which.
+function show(index) {
+  at = Math.max(0, Math.min(slides.length - 1, index));
+  slides.forEach((slide, i) => slide.classList.toggle("is-active", i === at));
+  [...$("dots").children].forEach((dot, i) => dot.classList.toggle("on", i === at));
+  $("cnum").textContent = String(at + 1).padStart(2, "0");
+  $("prog").style.width = ((at + 1) / slides.length * 100) + "%";
+  $("prev").disabled = at === 0; $("next").disabled = at === slides.length - 1;
+  document.title = "Neat Decision Studio";                 // one title for every page of the app
+  history.replaceState(null, "", "#" + (at + 1));
+}
+function play(on) {
+  clearInterval(timer); timer = null;
+  if (on) timer = setInterval(() => show(at === slides.length - 1 ? 0 : at + 1), Number($("seconds").value) * 1000);
+  $("play").classList.toggle("on", on);
+  $("play").textContent = on ? "Pause" : "Slideshow";
+}
+slides.forEach((slide, i) => {
+  const dot = Object.assign(document.createElement("button"), { title: slide.dataset.title, ariaLabel: slide.dataset.title });
+  dot.onclick = () => show(i);
+  $("dots").append(dot);
+});
+$("ctotal").textContent = String(slides.length).padStart(2, "0");
+$("prev").onclick = () => show(at - 1);
+$("next").onclick = () => show(at + 1);
+$("play").onclick = () => play(!timer);
+$("seconds").onchange = () => { try { localStorage.setItem("laya.showcase.seconds", $("seconds").value); } catch (_) { /* not kept */ } if (timer) play(true); };
+try { const kept = localStorage.getItem("laya.showcase.seconds"); if (["5", "10", "20", "30"].includes(kept)) $("seconds").value = kept; } catch (_) { /* default */ }
+for (const button of document.querySelectorAll("[data-next]")) button.onclick = () => show(at + 1);
+addEventListener("keydown", (event) => {
+  if (event.ctrlKey || event.metaKey || event.altKey || /^(SELECT|INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  const key = event.key;
+  if (key === "ArrowRight" || key === "ArrowDown" || key === "PageDown" || key === " ") { event.preventDefault(); show(at + 1); }
+  else if (key === "ArrowLeft" || key === "ArrowUp" || key === "PageUp") { event.preventDefault(); show(at - 1); }
+  else if (key === "Home") show(0);
+  else if (key === "End") show(slides.length - 1);
+  else if (key.toLowerCase() === "p") play(!timer);
+  else if (key.toLowerCase() === "f") { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {}); }
+});
+let touchX = null;
+addEventListener("touchstart", (event) => { touchX = event.touches[0].clientX; }, { passive: true });
+addEventListener("touchend", (event) => {
+  if (touchX === null) return;
+  const moved = event.changedTouches[0].clientX - touchX; touchX = null;
+  if (Math.abs(moved) > 60) show(at + (moved < 0 ? 1 : -1));
+});
+show((Number(location.hash.slice(1)) || 1) - 1);
+
+// ---- A decision made on this board every few seconds, on the first slide.
+const DEPARTMENT = { type: "choice", instructions: "Which department should handle this?",
+                     criteria: { billing: "invoices, payments, refunds", technical: "bugs, outages, errors", sales: "pricing, demos, purchases" } };
+const TONE = { type: "choice", instructions: "What is the tone of the message?", criteria: ["positive", "neutral", "negative"] };
+// Each of these is answered the same way by all four question models (checked on the board).
+const EXAMPLES = [
+  ["We were billed twice for March. Please refund the duplicate.", DEPARTMENT],
+  ["Thanks for the quick fix yesterday, everything works again!", TONE],
+  ["The app crashes whenever I upload a photo larger than 10 MB.", DEPARTMENT],
+  ["I want my money back right now or I am calling my lawyer.", TONE],
+  ["The password reset email never arrives and I am locked out.", DEPARTMENT],
+];
+let titles = {}, turnOf = 0;
+// A model that is on the board but not on Hugging Face: what is known of its checkpoint.
+const LOCAL = { "laya-chess": { title: "Laya-chess", encoder: "ModernBERT-large, 421M parameters", languages: "English (chess positions)", ms: 34.8 },
+                "laya": { title: "Laya" }, "laya-dino": { title: "Laya-dino" } };
+const recent = [];
+const swapIn = (node) => { node.classList.remove("swap"); void node.offsetWidth; node.classList.add("swap"); };
+
+async function decide() {
+  if (document.hidden || at !== 0) return;             // only while the slide that shows it is up
+  let info;
+  try { info = await (await fetch("/api/info")).json(); } catch (_) { return; }
+  const loaded = Object.keys(info.models).find((name) => info.models[name].loaded);
+  $("liveDot").classList.toggle("off", !loaded);
+  $("liveState").classList.toggle("none", !loaded);
+  if (!loaded) {
+    $("liveLabel").textContent = "This board"; $("liveModel").textContent = "";
+    $("liveState").textContent = "No model is on the MLA yet."; $("liveAsk").textContent = "";
+    $("liveRows").replaceChildren(); $("liveMs").textContent = "–";
+    $("liveNote").innerHTML = '<a href="/models">Load one in Settings</a>';
+    return;
+  }
+  const [state, question] = EXAMPLES[turnOf++ % EXAMPLES.length];
+  let body;
+  try {
+    body = await (await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: loaded, state, questions: { answer: question } }) })).json();
+  } catch (_) { return; }
+  if (body.error) return;                              // the model changed under us: the next round sees it
+  const answer = body.answers.answer;
+  recent.push(body.usage.mla_ms);
+  while (recent.length > 8) recent.shift();
+  $("liveLabel").textContent = "Live from this board";
+  $("liveModel").textContent = titles[loaded] || loaded;
+  $("liveState").textContent = state; swapIn($("liveState"));
+  $("liveAsk").textContent = question.instructions; swapIn($("liveAsk"));
+  $("liveRows").replaceChildren(...Object.entries(answer.probabilities).map(([option, p]) => {
+    const row = Object.assign(document.createElement("div"), { className: "live-row" + (option === answer.choice ? " top" : "") });
+    row.innerHTML = '<span></span><span class="track"><i></i></span><b></b>';
+    row.querySelector("span").textContent = option;
+    const bar = row.querySelector("i");
+    bar.style.width = "0";
+    requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = (p * 100).toFixed(1) + "%"; }));
+    row.querySelector("b").textContent = (p * 100).toFixed(1) + "%";
+    return row;
+  }));
+  $("liveMs").textContent = (recent.reduce((sum, ms) => sum + ms, 0) / recent.length).toFixed(1);
+  $("liveNote").textContent = `decided just now · ${body.usage.tokens} tokens`;
+}
+
+// ---- The models, as Settings lists them: the board's, and those on Hugging Face.
+async function showModels() {
+  let info, hub;
+  try { [info, hub] = await Promise.all([fetch("/api/info").then((r) => r.json()), fetch("/api/hub").then((r) => r.json())]); } catch (_) { return; }
+  if (!hub.listed && hub.repo && !hub.error) { setTimeout(showModels, 800); return; }       // the list is still being fetched
+  const names = [...new Set([...Object.keys(hub.models), ...Object.keys(info.models)])];
+  const cell = (className, ...children) => { const td = document.createElement("td"); td.className = className; td.append(...children); return td; };
+  const el = (tag, text, className = "") => Object.assign(document.createElement(tag), { textContent: text, className });
+  $("modelRows").replaceChildren(...names.map((name) => {
+    const local = info.models[name], remote = hub.models[name] || {}, known = LOCAL[local?.checkpoint] || {};
+    titles[name] = remote.title || known.title || name;
+    const graph = (remote.graphs || []).find((g) => g.latency_ms) || (known.ms ? { latency_ms: known.ms } : null);
+    const where = local?.loaded ? ["loaded on the MLA", "loaded"] : local ? ["on this board", "board"] : ["on Hugging Face", "remote"];
+    const row = document.createElement("tr");
+    row.append(cell("", el("b", titles[name]), el("span", remote.about || "", "about")), cell("wide", remote.card?.encoder || known.encoder || ""),
+               cell("wide", remote.card?.languages || known.languages || ""), cell("num", graph ? `${graph.latency_ms} ms` : "–"), cell("", el("span", where[0], "pill " + where[1])));
+    return row;
+  }));
+}
+
+showModels().then(decide);
+setInterval(decide, 3600);
+setInterval(showModels, 15000);
+</script>
+</body>
+</html>

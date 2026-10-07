@@ -6,3 +6,11 @@
 # Upstream Laya, cloned for the PyTorch reference only (see README)
 /third_party/
 __pycache__/
+# On the board, where the repository itself can be the app directory: the built runtime,
+# downloaded or deployed models, and the app's log
+/runtime/build/
+/laya
+/model/
+/model-*/
+/webapp.log
+/.reset-token

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
-<title>Debate &middot; Laya on Modalix</title>
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
@@ -131,10 +131,6 @@
   .examples button { font-size: 13.5px; padding: 3px 10px; }
   .answerhead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 16px; }
   .answerhead .hero .value { font-size: 30px; }
-  .budget { position: relative; height: 8px; background: var(--track); border-radius: 999px; margin: 8px 0 4px; }
-  .budget .fill { height: 100%; border-radius: 999px; background: var(--good); width: 0; transition: width .15s; }
-  .budget .fill.over { background: var(--bad); }
-  .budget .mark { position: absolute; top: -4px; bottom: -4px; left: 66.67%; width: 2px; background: var(--ink); opacity: .55; }
   .verdict { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
   .verdict small { font-size: 15px; font-weight: 400; color: var(--muted); margin-left: 8px; }
   .pie { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr); gap: 18px; align-items: center; margin-top: 10px; }
@@ -152,7 +148,7 @@
   .trace .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
   .trace text { font: 11px system-ui, sans-serif; fill: var(--muted); }
   /* One column: the question, then the answer, each element under the last. */
-  header, .gamebar, main, .pagehead, .hero-strip { max-width: 1180px; margin-left: auto; margin-right: auto; width: 100%; }
+  header, .gamebar, main, .pagehead { max-width: 1180px; margin-left: auto; margin-right: auto; width: 100%; }
   /* The answer on top, the question at the bottom, where it stays in reach while scrolling. */
   /* The question box stays in view while the answer above it changes, except on screens too
      short to hold both. The question is also repeated above the chart, so it is never out of sight. */
@@ -188,11 +184,11 @@
 </style>
 <link rel="stylesheet" href="/static/neat.css">
 </head>
-<body data-landing>
+<body>
 <header>
   <h1>Debate</h1>
   <p>Ask a yes-or-no question and Laya answers it, as you type</p>
-  <nav><a class="here" href="/">Debate</a><a href="/questions">Questions</a><a href="/games">Games</a><a href="/models">Models</a></nav>
+  <nav><a class="here" href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a href="/games">Games</a></nav>
 </header>
 <script src="/static/brand.js"></script>
 <div class="gamebar"><div id="picker"></div></div>
@@ -222,8 +218,6 @@
       <div class="stat"><b id="rate">&ndash;</b><span>answers per second while typing</span></div>
       <div class="stat"><b id="count">0</b><span>decisions made</span></div>
     </div>
-    <div class="budget" title="Time on the MLA for the last answer, against a 30 ms budget"><div class="fill" id="budgetFill"></div><div class="mark"></div></div>
-    <div class="legend" style="justify-content:space-between"><span>0 ms</span><span>30 ms budget</span><span>45 ms</span></div>
     <div class="block">
       <h2>As you typed</h2>
       <svg class="trace" id="trace" viewBox="0 0 300 70" preserveAspectRatio="none" role="img" aria-label="Probability of yes over time">
@@ -259,6 +253,11 @@ const EXAMPLES = ["Is the sky blue?", "Is the Earth flat?", "Do fish live in wat
 const OPTIONS = ["yes", "no"];
 const ASK = { type: "choice", instructions: "Is the answer yes or no?", criteria: OPTIONS };
 const asState = (text) => "Question: " + text;
+// CLM is asked the way its heads were trained instead: the question itself, as a yes-or-no
+// question, with nothing before it. One-word options are also what it embeds worst on the MLA.
+const isClm = () => picker.models[picker.name]?.kind === "clm";
+const asked = (text) => isClm() ? { state: "", questions: { answer: { type: "noul", instructions: text } } }
+                                : { state: asState(text), questions: { answer: ASK } };
 
 let sequence = 0, shown = null, target = null, decisions = 0;
 const trace = [], stamps = [];
@@ -308,9 +307,6 @@ function showAnswer(yes, usage, trip) {
   $("traceLine").setAttribute("points", trace.map((p, i) => `${(i * step).toFixed(1)},${(66 - p * 62).toFixed(1)}`).join(" "));
   $("traceNote").textContent = `${trace.length} decision${trace.length === 1 ? "" : "s"}`;
   $("mlaMs").textContent = usage.mla_ms.toFixed(1);
-  const fill = $("budgetFill");
-  fill.style.width = Math.min(100, usage.mla_ms / 45 * 100) + "%";
-  fill.classList.toggle("over", usage.mla_ms > 30);
   $("total").textContent = usage.latency_ms.toFixed(1) + " ms";
   $("trip").textContent = trip.toFixed(0) + " ms";
   const now = performance.now();
@@ -332,20 +328,20 @@ function reset() {
   $("pie").setAttribute("aria-label", "No answer yet");
   $("pctYes").textContent = $("pctNo").textContent = "\u2013";
   $("verdict").textContent = "\u2013";
-  $("mlaMs").textContent = "\u2013"; $("budgetFill").style.width = "0";
+  $("mlaMs").textContent = "\u2013";
   $("tokens").textContent = "\u2013"; $("tokensUnit").textContent = "tokens to decide";
   $("traceLine").setAttribute("points", ""); $("traceNote").textContent = "";
 }
 
 async function decide() {
   const text = $("question").value.trim();
-  if (!picker.ready) { $("hint").textContent = "No model is on the MLA. Load one in the Models tab."; return; }
+  if (!picker.ready) { $("hint").textContent = "No model is on the MLA. Load one in Settings."; return; }
   if (!text) { $("hint").textContent = "Type a yes-or-no question."; return; }
   const mine = ++sequence, sent = performance.now();
   let body;
   try {
     body = await (await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: picker.name, max_len: picker.budget, state: asState(text), questions: { answer: ASK } }) })).json();
+      body: JSON.stringify({ model: picker.name, max_len: picker.budget, ...asked(text) }) })).json();
   } catch (error) {
     body = { error: "The board did not answer: " + error.message };
   }
@@ -354,8 +350,9 @@ async function decide() {
   $("error").hidden = !body.error;
   if (body.error) { $("error").textContent = body.error; return; }
   picker.report(body.usage);
-  $("hint").textContent = "The only answers Laya can give are yes and no.";
-  showAnswer(body.answers.answer.probabilities.yes, body.usage, performance.now() - sent);
+  $("hint").textContent = `The only answers ${isClm() ? "CLM" : "Laya"} can give are yes and no.`;
+  const answer = body.answers.answer;
+  showAnswer(answer.type === "noul" ? answer.noul : answer.probabilities.yes, body.usage, performance.now() - sent);
 }
 
 // Live feedback: one request at a time, and as soon as it returns, another if the text has
@@ -385,8 +382,11 @@ $("question").oninput = changed;
 $("clear").onclick = () => { $("question").value = ""; reset(); showAsked(); $("hint").textContent = "Type a yes-or-no question."; $("question").focus(); };
 showAsked();
 
+// A question handed over in the address, as the landing page does, is asked as if typed.
+{ const handed = new URLSearchParams(location.search).get("q"); if (handed) $("question").value = handed.slice(0, 400); }
+
 const picker = createModelPicker({ mount: $("picker"), onReady: (ready) => {
-  if (ready) { reset(); changed(); } else $("hint").textContent = "No model is on the MLA. Load one in the Models tab.";
+  if (ready) { reset(); changed(); } else $("hint").textContent = "No model is on the MLA. Load one in Settings.";
 } });
 picker.onBudget = changed;
 </script>

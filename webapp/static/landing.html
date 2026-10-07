@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
+<link rel="stylesheet" href="/static/neat.css">
+<style>
+  /* The first screen: what this is in a line, a question to ask, and the four ways in. The
+     longer story is the showcase (/showcase). Colours, fonts and the header come from neat.css. */
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--ink); font-size: 15px; }
+  main.home { flex: 1; width: 100%; max-width: 860px; margin: 0 auto; padding: 0 24px 40px; display: flex; flex-direction: column;
+              align-items: center; justify-content: center; text-align: center; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  main.home > * { animation: rise .6s cubic-bezier(.2, .7, .2, 1) both; }
+  main.home > :nth-child(2) { animation-delay: .06s; } main.home > :nth-child(3) { animation-delay: .12s; }
+  main.home > :nth-child(4) { animation-delay: .18s; } main.home > :nth-child(5) { animation-delay: .24s; }
+  main.home > :nth-child(6) { animation-delay: .3s; } main.home > :nth-child(7) { animation-delay: .36s; }
+  main.home > :nth-child(8) { animation-delay: .42s; }
+  @media (prefers-reduced-motion: reduce) { main.home > * { animation: none; } }
+  .mark { width: 84px; height: 84px; margin-top: 36px; border-radius: 20px; filter: drop-shadow(0 10px 26px color-mix(in srgb, var(--accent) 34%, transparent)); }
+  h1 { margin: 16px 0 0; font-size: clamp(32px, 5vw, 46px); letter-spacing: -.035em; line-height: 1.1; }
+  .slogan { margin: 6px 0 0; font-size: clamp(19px, 2.6vw, 25px); font-weight: 650; letter-spacing: -.02em; }
+  /* The emoji are pictures, not characters: the board has no emoji font, and a picture looks the same everywhere. */
+  .tile .emoji { display: block; width: 30px; height: 30px; margin-bottom: 10px; }
+  .grad { background: var(--spectrum); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .lead { margin: 10px 0 0; color: var(--muted); font-size: 16.5px; max-width: 54ch; }
+  form.ask { display: flex; gap: 8px; width: 100%; max-width: 620px; margin-top: 26px; padding: 6px; background: var(--panel);
+             border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--shadow-md); }
+  form.ask:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+  form.ask input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--ink); font: inherit; font-size: 16px; padding: 8px 14px; }
+  form.ask button { border: 0; border-radius: 999px; padding: 9px 20px; font: inherit; font-weight: 600; cursor: pointer;
+                    background: var(--accent); color: var(--accent-ink); }
+  form.ask button:hover { background: var(--accent-strong); color: var(--accent-ink); }
+  .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
+  .chips a { text-decoration: none; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+             padding: 6px 14px; font-size: 13.5px; transition: .16s ease; }
+  .chips a:hover { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; width: 100%; margin-top: 34px; text-align: left; }
+  .tile { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+          padding: 16px; text-decoration: none; color: var(--ink); transition: .16s ease; }
+  .tile:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+  .tile h3 { margin: 0 0 4px; font-size: 16.5px; letter-spacing: -.01em; }
+  .tile p { margin: 0; color: var(--muted); font-size: 13.5px; }
+  .status { margin-top: 26px; color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; align-items: center; }
+  .status i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); margin-right: 7px; }
+  .status i.on { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); }
+  .status a { color: var(--accent-strong); font-weight: 600; text-decoration: none; }
+  .status a:hover { text-decoration: underline; }
+</style>
+</head>
+<body data-home>
+<header>
+  <h1>Neat Decision Studio</h1>
+  <p>System-1 decision models on the SiMa.ai Modalix MLSoC</p>
+  <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a href="/games">Games</a></nav>
+</header>
+<script src="/static/brand.js"></script>
+<main class="home">
+  <img class="mark" src="/static/brand/neat-decision.svg" alt="">
+  <h1>Neat Decision Studio</h1>
+  <p class="slogan">Decisions at Reflex Speed, <span class="grad">at the Edge.</span></p>
+  <p class="lead">Ask a question and a decision model answers in about 19 ms, entirely on the Modalix MLSoC.</p>
+  <form class="ask" action="/debate" method="get">
+    <input name="q" autocomplete="off" autofocus aria-label="A yes-or-no question" placeholder="Ask something with a yes or no answer&hellip;">
+    <button type="submit">Ask</button>
+  </form>
+  <div class="chips" id="chips"></div>
+  <div class="tiles" data-min="170">
+    <a class="tile" href="/debate"><img class="emoji" src="/static/brand/emoji-debate.svg" alt=""><h3>Debate</h3><p>Yes or No, Answered as You Type</p></a>
+    <a class="tile" href="/questions"><img class="emoji" src="/static/brand/emoji-questions.svg" alt=""><h3>Questions</h3><p>Your Own Text, Questions and Options</p></a>
+    <a class="tile" href="/compare"><img class="emoji" src="/static/brand/emoji-compare.svg" alt=""><h3>Compare</h3><p>One Question, Every Loaded Model</p></a>
+    <a class="tile" href="/games"><img class="emoji" src="/static/brand/emoji-games.svg" alt=""><h3>Games</h3><p>Seven Games It Plays, With You in Them</p></a>
+  </div>
+  <div class="status"><span><i id="dot"></i><span id="model">&nbsp;</span></span><a class="go" href="/showcase">See the Showcase</a></div>
+</main>
+<script>
+"use strict";
+// Questions the English model answers correctly, as a place to start.
+for (const question of ["Is ice colder than steam?", "Do birds have wings?", "Is Berlin the capital of Spain?", "Can a square have five sides?"]) {
+  document.getElementById("chips").append(Object.assign(document.createElement("a"), { href: "/debate?q=" + encodeURIComponent(question), textContent: question }));
+}
+// What is on the MLA right now.
+(async function status() {
+  try {
+    const info = await (await fetch("/api/info")).json();
+    const all = info.loaded || Object.keys(info.models).filter((name) => info.models[name].loaded), loaded = all[0];
+    document.getElementById("dot").classList.toggle("on", Boolean(loaded));
+    document.getElementById("model").textContent = all.length > 1 ? `${all.join(", ")} are on the MLA`
+      : loaded ? `${loaded} is on the MLA` : "No model is on the MLA yet";
+    if (!loaded) document.getElementById("model").append(": ", Object.assign(document.createElement("a"), { href: "#settings", textContent: "load one in Settings" }));
+  } catch (_) { /* the next round will say */ }
+  setTimeout(status, 4000);
+})();
+</script>
+</body>
+</html>

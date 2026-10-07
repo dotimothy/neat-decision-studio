@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f4b; --warn: #b45309; --bad: #c0362c;
+    --track: #e8ebf1; --chip: #eef2f8; --field: #ffffff; --sky: #f9fafc; --you: #b45309;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebf0; --muted: #98a2b3; --line: #2a303a;
+      --accent: #5b9dff; --accent-ink: #0b1220; --good: #4cc38a; --warn: #f0a84b; --bad: #f47067;
+      --track: #232934; --chip: #1f252e; --field: #11151a; --sky: #12161b; --you: #f0a84b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 18px 24px 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid transparent; font-size: 14px; }
+  nav a:hover { border-color: var(--line); }
+  nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
+  main { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 16px;
+         padding: 0 24px 32px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 0 16px 24px; }
+                              header { padding: 16px 16px 10px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .controls { margin-top: 12px; justify-content: space-between; }
+  .hint { color: var(--muted); font-size: 13.5px; }
+  kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+        padding: 1px 6px; background: var(--chip); color: var(--ink); }
+  button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--chip); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-variant-numeric: tabular-nums; font-size: 16px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero .value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .hero .unit { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+        font: 12.5px/1.4 var(--mono); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bar { display: grid; grid-template-columns: 48px minmax(0, 1fr) 52px; gap: 8px; align-items: center;
+         margin-top: 6px; font-size: 13.5px; }
+  .bar .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .bar.top .track i { opacity: 1; }
+  .bar.top .name { font-weight: 650; }
+  .bar .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .block { margin-top: 16px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px; }
+  .slider-head { display: flex; justify-content: space-between; font-size: 13.5px; }
+  .slider-head b { font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .error { color: var(--bad); margin-top: 10px; overflow-wrap: anywhere; }
+  .gamebar { display: flex; gap: 6px; align-items: center; padding: 0 24px 12px; color: var(--muted); font-size: 14px; }
+  .gamebar a { color: var(--muted); text-decoration: none; padding: 3px 12px; border-radius: 8px; border: 1px solid var(--line); }
+  .gamebar a.here { color: var(--ink); background: var(--chip); border-color: var(--accent); }
+  @media (max-width: 900px) { .gamebar { padding: 0 16px 10px; } }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+  select { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 8px; }
+  .boardhead { justify-content: space-between; margin-bottom: 10px; }
+  .boardhead h2 { margin: 0; }
+  .boardhead label { color: var(--muted); font-size: 13.5px; }
+  .seats { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  #boardwrap { display: flex; justify-content: center; }
+  .status { min-height: 24px; font-weight: 600; }
+  .status.over { color: var(--accent); }
+  .option { display: grid; grid-template-columns: 96px minmax(0, 1fr) 52px; gap: 2px 8px; align-items: center; margin-top: 6px; font-size: 13.5px; }
+  .option .what { color: var(--muted); }
+  .option.top .name { font-weight: 650; }
+  .option .track { grid-column: 2; height: 6px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .option .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .option.top .track i { opacity: 1; }
+  .option .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .option.bad .what { color: var(--bad); }
+  .asked { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+  .arena { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: stretch; }
+  .hand { background: var(--sky); border: 1px solid var(--line); border-radius: 14px; padding: 16px 12px; text-align: center; min-height: 150px;
+          display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+  .hand .who { font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .hand .throw { font-size: clamp(26px, 5vh, 40px); font-weight: 700; letter-spacing: -.02em; text-transform: capitalize; min-height: 1.2em; }
+  .hand.won { border-color: var(--good); background: color-mix(in srgb, var(--good) 14%, var(--sky)); }
+  .hand.won .throw { color: var(--good); }
+  .versus { align-self: center; color: var(--muted); font-weight: 600; }
+  .throws { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+  .throws button { padding: 16px 8px; font-size: 18px; font-weight: 650; border-radius: 12px; text-transform: capitalize; }
+  .throws button kbd { margin-left: 8px; font-weight: 400; }
+  .streak { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; min-height: 18px; }
+  .streak i { width: 14px; height: 14px; border-radius: 4px; background: var(--track); }
+  .streak i.win { background: var(--good); } .streak i.loss { background: var(--bad); }
+</style>
+<link rel="stylesheet" href="/static/neat.css">
+</head>
+<body>
+<header>
+  <h1>Rock Paper Scissors</h1>
+  <p id="tagline">Laya reads your last throws, says what you will throw next, and plays what beats it</p>
+  <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a class="here" href="/games">Games</a></nav>
+</header>
+<script src="/static/brand.js"></script>
+<div class="gamebar">Games <div id="picker"></div></div>
+<main>
+  <section>
+    <div class="row boardhead">
+      <h2>Round <span id="roundNo">1</span></h2>
+      <span class="seats">
+        <label for="seat">Against Laya</label>
+        <select id="seat" aria-label="Who plays against Laya"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option></select>
+      </span>
+    </div>
+    <div class="arena">
+      <div class="hand" id="handA"><span class="who" id="whoA">You</span><span class="throw" id="throwA">&ndash;</span></div>
+      <span class="versus">against</span>
+      <div class="hand" id="handB"><span class="who" id="whoB">Laya</span><span class="throw" id="throwB">&ndash;</span></div>
+    </div>
+    <div class="throws" id="throws">
+      <button data-throw="rock">Rock<kbd>R</kbd></button>
+      <button data-throw="paper">Paper<kbd>P</kbd></button>
+      <button data-throw="scissors">Scissors<kbd>S</kbd></button>
+    </div>
+    <div class="row controls">
+      <span class="status" id="status">&nbsp;</span>
+      <span class="row" id="pace">
+        <select id="speed" aria-label="Speed">
+          <option value="fast">As Fast As It Decides</option>
+          <option value="watch">Watch Speed</option>
+        </select>
+        <button id="auto">Pause</button>
+      </span>
+    </div>
+    <div class="scores">
+      <div class="stat"><b id="winsA">0</b><span id="winsALabel">you won</span></div>
+      <div class="stat"><b id="ties">0</b><span>ties</span></div>
+      <div class="stat"><b id="winsB">0</b><span>Laya won</span></div>
+      <div class="stat"><b id="guessed">&ndash;</b><span>times Laya named the throw</span></div>
+    </div>
+    <div class="streak" id="streak" aria-label="The last rounds"></div>
+    <div class="row controls"><span class="hint" id="hint">Green: you won the round. Red: Laya did. By chance it names your throw one time in three.</span>
+      <button class="small" id="resetScores">Reset Scores</button></div>
+    <div class="error" id="error" hidden></div>
+  </section>
+
+  <section>
+    <h2>Laya's decisions</h2>
+    <div class="hero"><span class="value" id="mlaMs">&ndash;</span><span class="unit">ms on the MLA per decision</span></div>
+    <div class="stats">
+      <div class="stat"><b id="count">0</b><span>decisions made</span></div>
+      <div class="stat"><b id="rate">&ndash;</b><span>decisions per second</span></div>
+      <div class="stat"><b id="rounds">&ndash;</b><span>rounds per second</span></div>
+      <div class="stat"><b id="tokens">&ndash;</b><span>tokens in the question</span></div>
+      <div class="stat"><b id="graph">&ndash;</b><span>graph it ran on</span></div>
+      <div class="stat"><b id="trip">&ndash;</b><span>browser round trip</span></div>
+    </div>
+    <div class="block">
+      <h2>What it is asked</h2>
+      <pre id="sees">&ndash;</pre>
+      <p class="note">This is the one game where the model reads the raw thing: the opponent's last eight throws, as words.
+        It decides before the round, from the rounds before it; it never sees the throw it is up against.</p>
+    </div>
+    <div class="block">
+      <h2>What it expects next</h2>
+      <div id="options"></div>
+      <p class="asked" id="plays" style="margin-top:10px">&nbsp;</p>
+    </div>
+  </section>
+</main>
+
+<script src="/static/rps-core.js"></script>
+<script src="/static/model-picker.js"></script>
+<script src="/static/llm-player.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Two sides, A on the left (you, or another Laya) and B on the right (Laya). Each side's own throws so far.
+let throws = { A: [], B: [] };
+let seat = "you", auto = true, busy = false, generation = 0;
+let record = { A: 0, B: 0, tie: 0, guessed: 0, guesses: 0 }, stats = { decisions: 0 };
+const recent = [], streak = [];
+try { const kept = localStorage.getItem("laya.rps.seat"); if (kept === "laya" || kept === "llm") seat = kept; } catch (_) { /* default */ }
+const SIDES = { you: ["You", "you won"], laya: ["Another Laya", "the other Laya won"], llm: ["An LLM", "the LLM won"] };
+// The other side can be any loaded model: another copy of this page's, or a different one.
+const rival = () => picker.seatModel($("seat"));
+const twins = () => rival() === picker.name;
+const rivalName = () => twins() ? "Another " + picker.short(rival()) : picker.short(rival());
+
+// A language model's throw: it is told both sides' throws so far and asked for a word.
+async function llmThrow() {
+  const reply = await llm.ask("You are playing rock paper scissors, many rounds. Answer with one word: rock, paper or scissors.",
+    `Your opponent's throws so far, oldest first: ${throws.B.slice(-RPS_MEMORY).join(", ") || "none yet"}.\n`
+    + `Your own throws so far: ${throws.A.slice(-RPS_MEMORY).join(", ") || "none yet"}.\nWhat do you throw now?`, 8);
+  const said = (reply.text.toLowerCase().match(/rock|paper|scissors/) || [])[0];
+  const mine = said || RPS_THROWS[Math.floor(Math.random() * 3)];
+  llm.played(reply, mine, Boolean(said));
+  return { mine, expected: null };
+}
+
+class NotLoaded extends Error {}
+
+// Laya's throw against an opponent whose throws so far are `theirs`: it says what comes next, and plays what beats that.
+async function layaThrow(theirs, show, model = picker.name) {
+  if (!theirs.length) {                    // nothing to read yet: any throw
+    const mine = RPS_THROWS[Math.floor(Math.random() * 3)];
+    if (show) { $("sees").textContent = "No throws to read yet: the first throw is made at random."; $("options").replaceChildren(); $("plays").textContent = " "; }
+    return { mine, expected: null };
+  }
+  const state = rpsState(theirs), sent = performance.now();
+  const response = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, max_len: picker.budgetFor(model), state, questions: { q: rpsQuestion() } }) });
+  const body = await response.json();
+  if (body.not_loaded) throw new NotLoaded(body.error);
+  if (body.error) throw new Error(body.error);
+  if (show) {                              // the figures on the page are the page's own model's
+    picker.report(body.usage);
+    recent.push({ at: performance.now(), mla: body.usage.mla_ms, trip: performance.now() - sent });
+    while (recent.length > 60) recent.shift();
+  }
+  stats.decisions++;
+  const answer = body.answers.q, mine = rpsCounter(answer.choice);
+  if (show) {
+    $("tokens").textContent = body.usage.tokens;
+    $("graph").textContent = body.usage.seq_len + " tokens";
+    $("sees").textContent = `${state}\n${RPS_INSTRUCTIONS}`;
+    $("options").replaceChildren(...RPS_THROWS.map((name) => {
+      const row = document.createElement("div"), p = answer.probabilities[name];
+      row.className = "option" + (name === answer.choice ? " top" : "");
+      row.innerHTML = '<span class="name"></span><span class="track" style="grid-column:auto"><i></i></span><span class="pct"></span>';
+      row.querySelector(".name").textContent = name;
+      row.querySelector("i").style.width = (p * 100).toFixed(1) + "%";
+      row.querySelector(".pct").textContent = (p * 100).toFixed(1) + "%";
+      return row;
+    }));
+    $("plays").textContent = `It expected ${answer.choice}, so it threw ${mine}.`;
+  }
+  return { mine, expected: answer.choice };
+}
+
+function draw(last) {
+  const total = record.A + record.B + record.tie, human = seat === "you";
+  $("roundNo").textContent = total + 1;
+  const me = picker.short(picker.name);
+  $("whoB").textContent = me;
+  $("whoA").textContent = seat === "laya" ? rivalName() : SIDES[seat][0];
+  $("winsALabel").textContent = seat === "laya" ? (twins() ? `the other ${me} won` : `${rivalName()} won`) : SIDES[seat][1];
+  $("winsA").textContent = record.A; $("winsB").textContent = record.B; $("ties").textContent = record.tie;
+  $("guessed").textContent = record.guesses ? `${record.guessed} of ${record.guesses}` : "–";
+  $("throws").hidden = !human;
+  for (const button of $("throws").children) button.disabled = busy || !picker.ready;
+  if (last) {
+    $("throwA").textContent = last.a; $("throwB").textContent = last.b;
+    $("handA").classList.toggle("won", last.score < 0); $("handB").classList.toggle("won", last.score > 0);
+  }
+  $("status").textContent = !picker.ready ? "No model is on the MLA. Load one in Settings."
+    : last ? (last.score > 0 ? `${me} wins the round` : last.score < 0 ? { you: "You win", laya: (twins() ? `The other ${me}` : rivalName()) + " wins", llm: "The LLM wins" }[seat] + " the round" : "A tie")
+    : human ? "Your throw" : seat === "laya" ? (twins() ? `Two copies of ${me}, each reading the other` : `${me} against ${rivalName()}, each reading the other`)
+    : `${me} against a language model`;
+  $("streak").replaceChildren(...streak.slice(-60).map((result) => Object.assign(document.createElement("i"), { className: result })));
+  $("count").textContent = stats.decisions.toLocaleString();
+  $("pace").hidden = human;
+  const lately = played.filter((at) => performance.now() - at < 1000).length;
+  $("rounds").textContent = human || !played.length ? "\u2013" : lately;
+  if (recent.length) {
+    const mean = (key) => recent.reduce((sum, r) => sum + r[key], 0) / recent.length;
+    $("mlaMs").textContent = mean("mla").toFixed(1);
+    $("trip").textContent = mean("trip").toFixed(0) + " ms";
+    $("rate").textContent = recent.filter((r) => performance.now() - r.at < 1000).length;
+  }
+}
+
+// One round. `a` is the left side's throw when a person makes it; another Laya decides its own.
+async function playRound(a) {
+  if (busy || !picker.ready) return;
+  busy = true;
+  const mine = generation;
+  $("error").hidden = true;
+  try {
+    // Laya decides from the rounds before this one; the throw it is up against is not in what it reads.
+    const b = await layaThrow(throws.A, true);
+    const other = a ? null : seat === "llm" ? await llmThrow() : await layaThrow(throws.B, false, rival());
+    if (mine !== generation) return;
+    a = a || other.mine;
+    const score = rpsScore(b.mine, a);
+    throws.A.push(a); throws.B.push(b.mine);
+    record[score > 0 ? "B" : score < 0 ? "A" : "tie"]++;
+    if (b.expected) { record.guesses++; record.guessed += b.expected === a; }
+    streak.push(score > 0 ? "loss" : score < 0 ? "win" : "tie");
+    played.push(performance.now());
+    while (played.length > 200) played.shift();
+    busy = false;
+    draw({ a, b: b.mine, score });
+  } catch (error) {
+    if (error instanceof NotLoaded) picker.lost();
+    else { $("error").hidden = false; $("error").textContent = error.message; setAuto(false); }
+  } finally {
+    busy = false;
+  }
+}
+
+// With nobody to wait for, the rounds come as fast as the model decides them, unless slowed down to watch.
+const played = [];                     // when the last rounds ended, for the rounds-per-second figure
+async function loop() {
+  while (auto && picker.ready && seat !== "you" && !busy) {
+    const mine = generation;
+    await playRound(null);
+    await sleep($("speed").value === "watch" ? 700 : 0);
+    if (mine !== generation) break;
+  }
+}
+
+function setAuto(value) {
+  auto = value;
+  $("auto").textContent = auto ? "Pause" : "Resume";
+  $("auto").classList.toggle("primary", !auto);
+  if (auto) loop();
+}
+
+function reset() {
+  generation++;
+  throws = { A: [], B: [] };
+  record = { A: 0, B: 0, tie: 0, guessed: 0, guesses: 0 }; streak.length = 0; played.length = 0;
+  for (const id of ["throwA", "throwB"]) $(id).textContent = "–";
+  $("handA").classList.remove("won"); $("handB").classList.remove("won");
+  $("hint").textContent = { you: "Green: you won the round. Red: Laya did. By chance it names your throw one time in three.",
+                            laya: twins() ? "Green: the other copy won the round. Red: this one did. Two of the same model fall into a cycle."
+                                          : `Green: ${rivalName()} won the round. Red: ${picker.short(picker.name)} did.`,
+                            llm: "Green: the LLM won the round. Red: Laya did. Laya answers in milliseconds, the LLM in seconds." }[seat];
+  llm.reset(); llm.show(seat === "llm");
+  draw();
+  loop();
+}
+
+for (const button of $("throws").children) button.onclick = () => playRound(button.dataset.throw);
+addEventListener("keydown", (event) => {
+  const name = { r: "rock", p: "paper", s: "scissors" }[event.key.toLowerCase()];
+  if (name && seat === "you" && !event.ctrlKey && !event.metaKey && !event.altKey && !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) playRound(name);
+});
+$("auto").onclick = () => setAuto(!auto);
+try { if (localStorage.getItem("laya.rps.speed") === "watch") $("speed").value = "watch"; } catch (_) { /* default */ }
+$("speed").onchange = () => { try { localStorage.setItem("laya.rps.speed", $("speed").value); } catch (_) { /* not kept */ } };
+$("resetScores").onclick = reset;
+$("seat").value = seat;
+$("seat").onchange = () => {
+  seat = $("seat").value;
+  try { localStorage.setItem("laya.rps.seat", seat); } catch (_) { /* not kept */ }
+  reset();
+};
+
+const llm = createLLMPlayer(document.querySelectorAll("main > section")[1]);
+const picker = createModelPicker({ mount: $("picker"), onReady: (ready) => { draw(); if (ready) loop(); } });
+picker.seats($("seat"));
+reset();
+</script>
+</body>
+</html>

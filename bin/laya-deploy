@@ -2,14 +2,16 @@
 # Copy compiled Laya models, the runtime and the web app to a Modalix DevKit and set it up
 # there. Models go on the NVMe: the root filesystem is too small for them.
 #
-#   bin/laya-deploy build/laya [--game build/laya-dino] [--extra NAME=BUILD_DIR ...]
+#   bin/laya-deploy [build/laya] [--game build/laya-dino] [--extra NAME=BUILD_DIR ...]
 #                   [--board user@host] [--remote DIR]
 #
+# Without a build directory only the runtime and the web app are copied; the app's Models
+# page then downloads compiled models from Hugging Face.
 # --game deploys a game-specialized model next to the general one (as model-dino).
 # --extra deploys another question model the page can switch to (as model-NAME).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-usage() { sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 build="" game=""
 extras=()
 board="${LAYA_BOARD:-sima@192.168.91.225}"
@@ -26,17 +28,17 @@ while [[ $# -gt 0 ]]; do
        build="$1"; shift ;;
   esac
 done
-[[ -n "$build" ]] || { usage >&2; exit 2; }
-
-for dir in "$build" ${game:+"$game"} "${extras[@]#*=}"; do
-  if [[ ! -f "$dir/sima_files/devkit/laya_config.json" ]]; then
-    echo "laya-deploy: $dir/sima_files/devkit/laya_config.json not found; run laya-compile first" >&2
+for dir in ${build:+"$build"} ${game:+"$game"} "${extras[@]#*=}"; do
+  if [[ ! -f "$dir/sima_files/devkit/laya_config.json" && ! -f "$dir/sima_files/devkit/clm_config.json" ]]; then
+    echo "laya-deploy: no laya_config.json or clm_config.json in $dir/sima_files/devkit; run laya-compile or clm-compile first" >&2
     exit 2
   fi
 done
 
-ssh -o BatchMode=yes "$board" "mkdir -p '$remote/model' '$remote/runtime' '$remote/webapp'"
-rsync -az --delete --info=stats1 "$build/sima_files/devkit/" "$board:$remote/model/"
+ssh -o BatchMode=yes "$board" "mkdir -p '$remote/runtime' '$remote/webapp'"
+if [[ -n "$build" ]]; then
+  rsync -az --delete --info=stats1 "$build/sima_files/devkit/" "$board:$remote/model/"
+fi
 if [[ -n "$game" ]]; then
   rsync -az --delete --info=stats1 "$game/sima_files/devkit/" "$board:$remote/model-dino/"
 fi
@@ -46,6 +48,13 @@ done
 rsync -az --delete --exclude build "$root/runtime/" "$board:$remote/runtime/"
 rsync -az --delete --exclude __pycache__ "$root/webapp/" "$board:$remote/webapp/"
 rsync -az "$root/setup.sh" "$root/run.sh" "$board:$remote/"
+# The copy has no git history, so it is told which version it is.
+version="$(cat "$root/VERSION")"
+if git -C "$root" rev-parse --short=12 HEAD > /dev/null 2>&1; then
+  version+="+$(git -C "$root" rev-parse --abbrev-ref HEAD).$(git -C "$root" rev-parse --short=12 HEAD)"
+  git -C "$root" diff --quiet HEAD 2> /dev/null || version+=".modified"
+fi
+ssh -o BatchMode=yes "$board" "printf '%s\n' '$version' > '$remote/VERSION'"
 ssh -o BatchMode=yes "$board" "sync; '$remote/setup.sh'"
 echo "deployed: $board:$remote"
 echo "  start the web app:  ssh $board $remote/run.sh"

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
-<title>Snake &middot; Laya on Modalix</title>
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
@@ -113,6 +113,10 @@
   button.small { padding: 3px 10px; font-size: 13.5px; }
   .asked { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
   canvas { display: block; margin: 0 auto; border-radius: 8px; background: var(--sky); border: 1px solid var(--line); }
+  #boardwrap { display: flex; gap: 12px; align-items: flex-start; }
+  .lane { flex: 1 1 0; min-width: 0; }
+  .lanehead { font-size: 12.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; text-align: center; }
+  #laneYou { color: var(--you); }
   .boardhead { justify-content: space-between; margin-bottom: 10px; }
   .boardhead h2 { margin: 0; }
   .gridrow { gap: 6px 8px; }
@@ -135,17 +139,17 @@
 <header>
   <h1>Snake</h1>
   <p id="tagline">Laya picks every move on the Modalix MLA from a description of where each one leads</p>
-  <nav><a href="/">Debate</a><a href="/questions">Questions</a><a class="here" href="/games">Games</a><a href="/models">Models</a></nav>
+  <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a class="here" href="/games">Games</a></nav>
 </header>
 <script src="/static/brand.js"></script>
-<div class="gamebar">Games <a href="/games">Dino Arena</a><a href="/games/blackjack">Blackjack</a><a class="here" href="/games/snake">Snake</a><a href="/games/sudoku">Sudoku</a>
+<div class="gamebar">Games <a class="here" href="/games">Snake</a><a href="/games/dino">Dino Arena</a><a href="/games/blackjack">Blackjack</a><a href="/games/sudoku">Sudoku</a>
   <div id="picker"></div></div>
 <main>
   <section>
     <div class="row boardhead">
       <h2>Board</h2>
       <span class="row gridrow">
-        <label for="sight">Laya sees</label>
+        <label for="sight">Laya Sees</label>
         <select id="sight" aria-label="How much of the board Laya sees"></select>
         <label for="gridSize">Grid</label>
         <select id="gridSize" aria-label="Grid size"></select>
@@ -153,7 +157,10 @@
         <input type="number" id="rows" aria-label="Rows"> <span class="hint">rows</span>
       </span>
     </div>
-    <div id="boardwrap"><canvas id="board" width="800" height="560" aria-label="Snake board"></canvas></div>
+    <div id="boardwrap">
+      <div class="lane"><div class="lanehead" id="laneLaya" hidden>Laya &middot; MLA</div><canvas id="board" width="800" height="560" aria-label="Laya's snake"></canvas></div>
+      <div class="lane" id="yourLane" hidden><div class="lanehead" id="laneYou">You</div><canvas id="boardYou" width="800" height="560" aria-label="Your snake"></canvas></div>
+    </div>
     <div class="row controls">
       <span class="hint" id="hint">One decision per move</span>
       <span class="row">
@@ -163,6 +170,8 @@
         </select>
         <button id="restart">New Game</button>
         <button id="auto">Pause</button>
+        <select id="rival" aria-label="Who races" data-seat="Against {}"><option value="you">Against You</option><option value="laya">Against Laya</option></select>
+        <button class="primary" id="race">Start Race</button>
       </span>
     </div>
     <div class="scores">
@@ -170,7 +179,12 @@
       <div class="stat"><b id="best">0</b><span>best game</span></div>
       <div class="stat"><b id="games">0</b><span>games finished</span></div>
       <div class="stat"><b id="average">&ndash;</b><span>average food per game</span></div>
+      <div class="stat"><b id="yourFood">&ndash;</b><span id="yourFoodLabel">you: food this race</span></div>
+      <div class="stat"><b id="yourBest">&ndash;</b><span id="yourBestLabel">you: best race</span></div>
     </div>
+    <p class="note"><kbd>Space</kbd> or <b>Start Race</b> starts two snakes on the same grid with the same first food. Against you, steer yours with the
+      arrow keys or <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>; it moves eight squares a second, as Laya's does at watch speed. Against another
+      loaded model, that model is asked what Laya is asked, and they race again when both are done.</p>
     <div class="row controls"><span class="hint">Scores are kept until reset, and start over when the grid or what Laya sees changes.</span><button class="small" id="resetScores">Reset Scores</button></div>
     <div class="error" id="error" hidden></div>
   </section>
@@ -221,6 +235,12 @@ function savedSight() {
 let seed = Date.now() & 0xfffff;
 const world = new SnakeWorld(seed, savedGrid(), savedSight());
 let auto = true, looping = false, game = 0;
+// The other snake in a race, the way a person last steered it, and its best race. It is a
+// person's, steered with the keys, or another loaded model's, which is asked what Laya is asked.
+let you = null, want = null, yourBest = null, racing = 0;
+const rivalIsModel = () => $("rival").value === "laya";
+const rivalModel = () => picker.seatModel($("rival"));
+const rivalName = () => !rivalIsModel() ? "You" : rivalModel() === picker.name ? "Another " + picker.short(rivalModel()) : picker.short(rivalModel());
 const fresh = () => ({ best: 0, games: 0, food: 0, decisions: 0, matched: 0 });
 let stats = fresh();
 const recent = [];
@@ -283,15 +303,17 @@ function showStats() {
 function palette() {
   const css = getComputedStyle(document.documentElement);
   const get = (name) => css.getPropertyValue(name).trim();
-  return { line: get("--line"), muted: get("--muted"), good: get("--good"), bad: get("--bad"), accent: get("--accent"), ink: get("--ink"), panel: get("--panel"), veil: get("--sky") || get("--bg") };
+  return { line: get("--line"), muted: get("--muted"), good: get("--good"), bad: get("--bad"), accent: get("--accent"), ink: get("--ink"), panel: get("--panel"), veil: get("--sky") || get("--bg"), you: get("--you") || get("--warn") };
 }
 let color = palette();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { color = palette(); draw(); });
 
-function draw() {
-  // Square cells, as large as the column is wide, but a tall grid still fits the window.
+// One snake's board on its canvas, `width` pixels wide at most.
+function paint(canvas, world, room, { veil = false, headColor, message = null }) {
+  const ctx = canvas.getContext("2d");
+  // Square cells, as large as the room is wide, but a tall grid still fits the window.
   const ratio = window.devicePixelRatio || 1;
-  const cell = Math.min($("boardwrap").clientWidth / world.cols, Math.max(360, innerHeight * 0.75) / world.rows);
+  const cell = Math.min(room / world.cols, Math.max(360, innerHeight * 0.75) / world.rows);
   const width = Math.floor(cell * world.cols), height = Math.floor(cell * world.rows);
   if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
     canvas.style.width = width + "px"; canvas.style.height = height + "px";
@@ -305,11 +327,11 @@ function draw() {
   for (let y = 1; y < world.rows; y++) { ctx.moveTo(0, y * cell); ctx.lineTo(width, y * cell); }
   ctx.stroke(); ctx.globalAlpha = 1;
   world.body.forEach((part, i) => {
-    ctx.fillStyle = !world.alive ? color.muted : i === 0 ? color.accent : color.good;
+    ctx.fillStyle = !world.alive ? color.muted : i === 0 ? headColor : color.good;
     const gap = Math.min(1.5, cell * 0.08);
     ctx.beginPath(); ctx.roundRect(part.x * cell + gap, part.y * cell + gap, cell - 2 * gap, cell - 2 * gap, cell * 0.22); ctx.fill();
   });
-  if (world.sight !== Infinity) {
+  if (veil && world.sight !== Infinity) {
     // What is out of sight is veiled: the snake takes those squares to be empty.
     const left = Math.max(0, world.head.x - world.sight) * cell, top = Math.max(0, world.head.y - world.sight) * cell;
     const right = Math.min(world.cols, world.head.x + world.sight + 1) * cell, bottom = Math.min(world.rows, world.head.y + world.sight + 1) * cell;
@@ -323,22 +345,36 @@ function draw() {
     ctx.fillStyle = color.bad;
     ctx.beginPath(); ctx.arc((world.food.x + 0.5) * cell, (world.food.y + 0.5) * cell, cell * 0.32, 0, 6.3); ctx.fill();
   }
-  if (!picker.ready || !world.alive) {
-    const text = !picker.ready ? "No model is on the MLA. Load one in the Models tab."
-                               : `The snake ${world.cause} after ${world.eaten} food`;
+  if (message) {
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.font = `600 ${Math.round(Math.max(11, Math.min(24, width / 28)))}px system-ui, sans-serif`;
     // The message has to be readable over a board of any size, snake included.
-    const box = Math.min(width - 8, ctx.measureText(text).width + 28), line = parseInt(ctx.font.slice(4)) * 2;
+    const box = Math.min(width - 8, ctx.measureText(message).width + 28), line = parseInt(ctx.font.slice(4)) * 2;
     ctx.fillStyle = color.panel; ctx.globalAlpha = 0.88;
     ctx.beginPath(); ctx.roundRect((width - box) / 2, (height - line) / 2, box, line, 8); ctx.fill();
     ctx.globalAlpha = 1; ctx.fillStyle = color.ink;
-    ctx.fillText(text, width / 2, height / 2, width - 20);
+    ctx.fillText(message, width / 2, height / 2, width - 20);
   }
+}
+
+// Laya's board, and beside it the other snake's while they race.
+function draw() {
+  $("yourLane").hidden = $("laneLaya").hidden = !you;
+  $("laneLaya").textContent = `${picker.short(picker.name)} \u00b7 MLA`;
+  $("laneYou").textContent = rivalIsModel() ? `${rivalName()} \u00b7 MLA` : "You";
+  $("yourFoodLabel").textContent = `${rivalName().toLowerCase() === "you" ? "you" : rivalName()}: food this race`;
+  $("yourBestLabel").textContent = `${rivalName().toLowerCase() === "you" ? "you" : rivalName()}: best race`;
+  const room = you ? ($("boardwrap").clientWidth - 12) / 2 : $("boardwrap").clientWidth;
+  paint(canvas, world, room, { veil: true, headColor: color.accent,
+    message: !picker.ready ? "No model is on the MLA. Load one in Settings." : !world.alive ? `The snake ${world.cause} after ${world.eaten} food` : null });
+  if (you) paint($("boardYou"), you, room, { headColor: color.you, message: you.alive ? null : `${rivalName()} ${you.cause} after ${you.eaten} food` });
+  $("yourFood").textContent = you ? you.eaten : "\u2013";
+  $("yourBest").textContent = yourBest === null ? "\u2013" : yourBest;
 }
 
 function newGame(grid) {
   seed = (seed * 31 + 7) & 0xfffff;
+  if (grid) you = null;                  // another grid ends a race
   world.reset(seed, grid);
   game++;
   $("hint").textContent = "One decision per move";
@@ -349,7 +385,15 @@ async function loop() {
   if (looping) return;
   looping = true;
   while (auto && picker.ready) {
-    if (!world.alive) { await sleep(1600); if (!auto || !picker.ready) break; newGame(); }
+    if (!world.alive) {
+      // Two models racing wait for each other, then race again on a new course.
+      const race = racing, duel = you && rivalIsModel();
+      while (duel && race === racing && you && you.alive) await sleep(100);
+      await sleep(1600);
+      if (!auto || !picker.ready) break;
+      if (duel && race === racing && you) { startRace(); continue; }
+      newGame();
+    }
     const started = performance.now(), asked = game;
     let move;
     try { move = await decide(); } catch (error) {
@@ -372,6 +416,66 @@ async function loop() {
   looping = false;
 }
 
+// A race: both snakes start again on the same grid with the same first food. Yours moves eight
+// squares a second, in the direction last steered.
+const TURNS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0], w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0] };
+async function startRace() {
+  if (!picker.ready) return;
+  const mine = ++racing;
+  newGame();
+  you = new SnakeWorld(seed, { cols: world.cols, rows: world.rows });
+  want = null;
+  $("hint").textContent = rivalIsModel() ? `${picker.short(picker.name)} against ${rivalName()}, on the same course` : "Racing: steer with the arrow keys";
+  if (!auto) setAuto(true); else loop();
+  draw();
+  if (rivalIsModel()) {
+    you.sight = world.sight;                 // it sees as much as Laya does
+    // Another model's snake: one decision a move, from the same description of where each leads.
+    const model = rivalModel(), name = rivalName();
+    while (mine === racing && you && you.alive) {
+      const started = performance.now(), { question } = you.question();
+      let body;
+      try {
+        body = await (await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model, max_len: picker.budgetFor(model), state: SNAKE_STATE, questions: { move: question } }) })).json();
+      } catch (error) { body = { error: "The board did not answer: " + error.message }; }
+      if (mine !== racing || !you) return;
+      if (body.error) { $("error").hidden = false; $("error").textContent = `${name}: ${body.error}`; you = null; draw(); return; }
+      you.step(body.answers.move.choice);
+      draw();
+      await sleep($("speed").value === "watch" ? Math.max(0, 125 - (performance.now() - started)) : 0);
+    }
+    if (mine === racing && you) {
+      yourBest = Math.max(yourBest ?? 0, you.eaten);
+      $("hint").textContent = `${name} ${you.cause} after ${you.eaten} food`;
+      draw();
+    }
+    return;
+  }
+  while (mine === racing && you && you.alive) {
+    await sleep(125);
+    if (mine !== racing || !you) return;
+    const { x, y } = you.heading;
+    // Steering is by compass; the snake turns left or right, or keeps on. It cannot reverse.
+    const move = !want || (want[0] === x && want[1] === y) || (want[0] === -x && want[1] === -y) ? "straight"
+      : (want[0] === y && want[1] === -x) ? "left" : "right";
+    you.step(move);
+    draw();
+  }
+  if (mine === racing && you) {
+    yourBest = Math.max(yourBest ?? 0, you.eaten);
+    $("hint").textContent = `You ${you.cause} after ${you.eaten} food. Space to race again`;
+    draw();
+  }
+}
+addEventListener("keydown", (event) => {
+  if (/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(document.activeElement.tagName) && event.code !== "Space") return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.code === "Space") { if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return; event.preventDefault(); if (!event.repeat && (!you || !you.alive)) startRace(); return; }
+  const turn = TURNS[event.key] || TURNS[event.key.toLowerCase()];
+  if (turn && you && you.alive) { event.preventDefault(); want = turn; }
+});
+
 function setAuto(value) {
   auto = value;
   $("auto").textContent = auto ? "Pause" : "Resume";
@@ -380,13 +484,15 @@ function setAuto(value) {
 }
 
 function setReady(ready) {
-  $("restart").disabled = $("auto").disabled = !ready;
+  $("restart").disabled = $("auto").disabled = $("race").disabled = !ready;
   draw();
   if (ready && auto) loop();
 }
 
 $("auto").onclick = () => setAuto(!auto);
-$("restart").onclick = () => { newGame(); if (auto) loop(); };
+$("restart").onclick = () => { racing++; you = null; newGame(); if (auto) loop(); };
+$("race").onclick = () => { $("race").blur(); startRace(); };
+$("rival").onchange = () => { racing++; you = null; yourBest = null; draw(); };
 
 // A game on another grid is another game: it starts over, and so do the scores it is compared by.
 function showGrid() {
@@ -428,7 +534,7 @@ function showSight() {
              + "but not where the rest of its body is, so a move can be called safe that is not.");
 }
 for (const sight of SIGHTS) {
-  $("sight").add(new Option(sight === Infinity ? "the whole board" : sight === 1 ? "the next square only" : `${sight} squares around its head`, String(sight)));
+  $("sight").add(new Option(sight === Infinity ? "The Whole Board" : sight === 1 ? "The Next Square Only" : `${sight} Squares Around Its Head`, String(sight)));
 }
 $("sight").onchange = () => {
   world.sight = Number($("sight").value);
@@ -441,6 +547,7 @@ $("resetScores").onclick = () => { stats = fresh(); recent.length = 0; showStats
 addEventListener("resize", draw);
 
 const picker = createModelPicker({ mount: $("picker"), onReady: setReady });
+picker.seats($("rival"));
 draw(); showStats();
 </script>
 </body>

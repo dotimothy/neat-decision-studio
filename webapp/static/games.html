@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
-<title>Dino Arena &middot; Laya on Modalix</title>
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
@@ -86,27 +86,28 @@
 <header>
   <h1>Dino Arena</h1>
   <p>Laya decides run, jump or duck on the Modalix MLA, about 45 times a second</p>
-  <nav><a href="/">Debate</a><a href="/questions">Questions</a><a class="here" href="/games">Games</a><a href="/models">Models</a></nav>
+  <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a class="here" href="/games">Games</a></nav>
 </header>
 <script src="/static/brand.js"></script>
-<div class="gamebar">Games <a class="here" href="/games">Dino Arena</a><a href="/games/blackjack">Blackjack</a><a href="/games/snake">Snake</a><a href="/games/sudoku">Sudoku</a>
+<div class="gamebar">Games <a href="/games">Snake</a><a class="here" href="/games/dino">Dino Arena</a><a href="/games/blackjack">Blackjack</a><a href="/games/sudoku">Sudoku</a>
   <div id="picker"></div></div>
 <main>
   <section>
     <h2>Arena</h2>
     <canvas id="arena" width="900" height="360" aria-label="Two lanes: Laya on top, you below"></canvas>
     <div class="row controls">
-      <span class="hint" id="hint"><kbd>Space</kbd> to race Laya &middot; <kbd>&uarr;</kbd> jump &middot; <kbd>&darr;</kbd> duck</span>
+      <span class="hint" id="hint"><kbd>Space</kbd> to race &middot; <kbd>&uarr;</kbd> jump &middot; <kbd>&darr;</kbd> duck</span>
       <span class="row">
         <button id="pause">Pause</button>
-        <button class="primary" id="race">Race Laya</button>
+        <select id="rival" aria-label="Who races" data-seat="Against {}"><option value="you">Against You</option><option value="laya">Against Laya</option></select>
+        <button class="primary" id="race">Start Race</button>
       </span>
     </div>
     <div class="scores">
-      <div class="stat"><b id="layaCleared">0</b><span>Laya: obstacles cleared</span></div>
-      <div class="stat"><b id="layaCrashes">0</b><span>Laya: crashes</span></div>
-      <div class="stat"><b id="youCleared">&ndash;</b><span>You: obstacles cleared</span></div>
-      <div class="stat"><b id="youBest">&ndash;</b><span>You: best run</span></div>
+      <div class="stat"><b id="layaCleared">0</b><span id="layaClearedLabel">Laya: obstacles cleared</span></div>
+      <div class="stat"><b id="layaCrashes">0</b><span id="layaCrashesLabel">Laya: crashes</span></div>
+      <div class="stat"><b id="youCleared">&ndash;</b><span id="youClearedLabel">You: obstacles cleared</span></div>
+      <div class="stat"><b id="youBest">&ndash;</b><span id="youBestLabel">You: best run</span></div>
     </div>
     <div class="error" id="error" hidden></div>
   </section>
@@ -308,13 +309,45 @@ let looping = false;
 const recent = [];        // {at, mla, trip} of the last decisions
 let decisions = 0;
 
+// The lower lane is a person's, played with the keys, or another loaded model's, which is
+// asked what Laya is asked. Two models race again when both have crashed.
+let racing = 0;
+const rivalIsModel = () => $("rival").value === "laya";
+const rivalModel = () => picker.seatModel($("rival"));
+const rivalName = () => !rivalIsModel() ? "You" : rivalModel() === picker.name ? "Another " + picker.short(rivalModel()) : picker.short(rivalModel());
+function showRival() {
+  $("layaClearedLabel").textContent = `${picker.short(picker.name)}: obstacles cleared`;
+  $("layaCrashesLabel").textContent = `${picker.short(picker.name)}: crashes`;
+  $("youClearedLabel").textContent = `${rivalName()}: obstacles cleared`;
+  $("youBestLabel").textContent = `${rivalName()}: best run`;
+}
+
 function startRace() {
   seed = (seed * 31 + 7) & 0xffff;
   laya.world.reset(seed); laya.action = "run";
   you.world = new DinoWorld(seed); you.action = "run";
-  $("hint").innerHTML = "<kbd>Space</kbd> or <kbd>&uarr;</kbd> jump &middot; <kbd>&darr;</kbd> duck";
-  $("race").textContent = "Restart race";
-  canvas.focus();
+  $("hint").innerHTML = rivalIsModel() ? `${picker.short(picker.name)} against ${rivalName()}, on the same course`
+    : "<kbd>Space</kbd> or <kbd>&uarr;</kbd> jump &middot; <kbd>&darr;</kbd> duck";
+  $("race").textContent = "Restart Race";
+  showRival();
+  if (rivalIsModel()) rivalLoop(++racing, rivalModel()); else { racing++; canvas.focus(); }
+}
+
+// The other model's reflexes: what it sees in its own lane, as often as it answers.
+async function rivalLoop(mine, model) {
+  while (mine === racing && ready && you.world && you.world.alive) {
+    if (paused) { await sleep(40); continue; }
+    let body;
+    try {
+      body = await (await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, max_len: picker.budgetFor(model), state: you.world.observe(), questions: { action: QUESTION } }) })).json();
+    } catch (error) {
+      body = { error: "The board did not answer: " + error.message };
+    }
+    if (mine !== racing) return;
+    if (body.error) { $("error").hidden = false; $("error").textContent = `${picker.short(model)}: ${body.error}`; await sleep(1000); continue; }
+    you.action = body.answers.action.choice;
+  }
 }
 
 async function decideLoop() {
@@ -354,6 +387,7 @@ async function decideLoop() {
 // The arena only runs while the chosen model is on the MLA. Loading is a deliberate click.
 function setReady(value) {
   ready = value;
+  showRival();
   $("race").disabled = $("pause").disabled = !value;
   $("model").textContent = picker.name;
   if (value) {
@@ -406,14 +440,18 @@ function tick(dt, now) {
     if (laya.world.step(dt, laya.action)) laya.action = "run";
     if (!laya.world.alive) { laya.crashes++; laya.restartAt = now + 1800; }
   } else if (now >= laya.restartAt && !(you.world && you.world.alive)) {
-    laya.world.reset(seed = (seed * 31 + 7) & 0xffff); laya.action = "run";
+    if (you.world && rivalIsModel()) startRace();            // two models: again, on a new course
+    else { laya.world.reset(seed = (seed * 31 + 7) & 0xffff); laya.action = "run"; }
   }
   if (you.world && you.world.alive) {
-    const action = you.keys.duck ? "duck" : you.keys.jump ? "jump" : "run";
-    you.world.step(dt, action);
+    const model = rivalIsModel();
+    const action = model ? you.action : you.keys.duck ? "duck" : you.keys.jump ? "jump" : "run";
+    if (you.world.step(dt, action) && model) you.action = "run";          // one decision, one jump
     if (!you.world.alive) {
       you.best = Math.max(you.best, you.world.cleared);
-      $("hint").innerHTML = `You hit a ${you.world.hit} after ${you.world.cleared}. <kbd>Space</kbd> to race again`;
+      if (model) laya.restartAt = Math.max(laya.restartAt, now + 1800);
+      $("hint").innerHTML = model ? `${rivalName()} hit a ${you.world.hit} after ${you.world.cleared}`
+        : `You hit a ${you.world.hit} after ${you.world.cleared}. <kbd>Space</kbd> to race again`;
     }
   }
 }
@@ -442,27 +480,27 @@ function draw() {
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = color.line; ctx.fillRect(0, lane, width, 1);
   const view = (top, label, body) => ({ left: cell * 2.2, top, ground: top + lane - cell * 0.9, cell, width, color, label, body });
-  laya.world.draw(ctx, view(0, "LAYA · MLA", color.accent));
+  laya.world.draw(ctx, view(0, `${picker.short(picker.name).toUpperCase()} · MLA`, color.accent));
   if (!ready) {
     ctx.fillStyle = color.sky; ctx.globalAlpha = 0.82; ctx.fillRect(0, 0, width, height); ctx.globalAlpha = 1;
     ctx.fillStyle = color.ink; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.font = `600 ${Math.round(cell * 0.7)}px system-ui, sans-serif`;
     ctx.fillText("No model is on the MLA", width / 2, height / 2 - cell * 0.5);
     ctx.fillStyle = color.muted; ctx.font = `${Math.round(cell * 0.52)}px system-ui, sans-serif`;
-    ctx.fillText("Load one in the Models tab; the game starts by itself", width / 2, height / 2 + cell * 0.5);
+    ctx.fillText("Load one in Settings; the game starts by itself", width / 2, height / 2 + cell * 0.5);
     return;
   }
   if (you.world) {
-    you.world.draw(ctx, view(lane, "YOU", color.you));
+    you.world.draw(ctx, view(lane, rivalIsModel() ? `${rivalName().toUpperCase()} · MLA` : "YOU", color.you));
   } else {
     ctx.fillStyle = color.muted; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.font = `${Math.round(cell * 0.6)}px system-ui, sans-serif`;
-    ctx.fillText("Press Space to race Laya on the same course", width / 2, lane * 1.5);
+    ctx.fillText(rivalIsModel() ? `Start Race sets ${rivalName()} on the same course` : "Press Space to race on the same course", width / 2, lane * 1.5);
   }
   if (!laya.world.alive) {
     ctx.fillStyle = color.bad; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.font = `600 ${Math.round(cell * 0.6)}px system-ui, sans-serif`;
-    ctx.fillText(`Laya hit a ${laya.world.hit}`, width / 2, lane * 0.45);
+    ctx.fillText(`${picker.short(picker.name)} hit a ${laya.world.hit}`, width / 2, lane * 0.45);
   }
 }
 
@@ -501,10 +539,12 @@ canvas.addEventListener("pointerdown", (event) => {
 addEventListener("pointerup", () => { you.keys.jump = you.keys.duck = false; });
 
 $("race").onclick = startRace;
+$("rival").onchange = () => { racing++; you.world = null; you.best = 0; $("race").textContent = "Start Race"; $("youCleared").textContent = $("youBest").textContent = "\u2013"; showRival(); };
 $("pause").onclick = () => { paused = !paused; $("pause").textContent = paused ? "Resume" : "Pause"; };
 $("delay").oninput = () => { $("delayValue").textContent = $("delay").value + " ms"; };
 
 const picker = createModelPicker({ mount: $("picker"), madeFor: "dino", onReady: setReady });
+picker.seats($("rival"));
 resize();
 requestAnimationFrame(frame);
 </script>

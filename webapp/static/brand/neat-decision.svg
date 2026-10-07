@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Neat Decision Studio: a hammer in the Palette Neat colours, with the Neat sparkle. -->
+  <defs>
+    <linearGradient id="spectrum" gradientUnits="userSpaceOnUse" x1="54" y1="0" x2="190" y2="0">
+      <stop offset="0" stop-color="#16c8a6"/><stop offset=".28" stop-color="#4bb54a"/><stop offset=".52" stop-color="#a9c81c"/>
+      <stop offset=".76" stop-color="#3a86ec"/><stop offset="1" stop-color="#f2801d"/>
+    </linearGradient>
+    <linearGradient id="handle" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f4f6f8"/><stop offset="1" stop-color="#b4bec9"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a222c"/><stop offset="1" stop-color="#0c1016"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#tile)" stroke="#2b3541" stroke-width="2"/>
+  <g transform="rotate(-45 124 140)">
+    <!-- the handle, with a darker grip at its foot -->
+    <rect x="112" y="96" width="24" height="142" rx="10" fill="url(#handle)"/>
+    <rect x="112" y="186" width="24" height="52" rx="10" fill="#6f7c8a"/>
+    <!-- the head: a short claw on one side, the neck, and a broad striking face on the other -->
+    <path d="M92 60 L60 70 Q50 74 54 84 L92 104 Z" fill="url(#spectrum)"/>
+    <rect x="86" y="58" width="84" height="48" rx="8" fill="url(#spectrum)"/>
+    <rect x="160" y="48" width="30" height="68" rx="9" fill="url(#spectrum)"/>
+    <rect x="182" y="48" width="8" height="68" rx="4" fill="#ffffff" opacity=".28"/>
+  </g>
+  <!-- the Neat sparkle: four arms in the palette's colours -->
+  <g transform="translate(196 62)">
+    <path d="M0 -34 L7 -7 L0 0 L-7 -7 Z" fill="#16c8a6"/>
+    <path d="M34 0 L7 7 L0 0 L7 -7 Z" fill="#a9c81c"/>
+    <path d="M0 34 L-7 7 L0 0 L7 7 Z" fill="#f2801d"/>
+    <path d="M-34 0 L-7 -7 L0 0 L-7 7 Z" fill="#3a86ec"/>
+    <circle r="4.5" fill="#0c1016"/>
+  </g>
+</svg>

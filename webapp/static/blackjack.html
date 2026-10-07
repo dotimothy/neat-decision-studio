@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E">
-<title>Blackjack &middot; Laya on Modalix</title>
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
@@ -118,21 +118,31 @@
 <body>
 <header>
   <h1>Blackjack</h1>
-  <p>Laya bets, doubles, hits and stands on the Modalix MLA, remembering the cards it has seen</p>
-  <nav><a href="/">Debate</a><a href="/questions">Questions</a><a class="here" href="/games">Games</a><a href="/models">Models</a></nav>
+  <p>Laya bets, doubles, hits and stands on the Modalix MLA, remembering the cards it has seen. Sit down and play the same dealer</p>
+  <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a class="here" href="/games">Games</a></nav>
 </header>
 <script src="/static/brand.js"></script>
-<div class="gamebar">Games <a href="/games">Dino Arena</a><a class="here" href="/games/blackjack">Blackjack</a><a href="/games/snake">Snake</a><a href="/games/sudoku">Sudoku</a>
+<div class="gamebar">Games <a href="/games">Snake</a><a href="/games/dino">Dino Arena</a><a class="here" href="/games/blackjack">Blackjack</a><a href="/games/sudoku">Sudoku</a>
   <div id="picker"></div></div>
 <main>
   <section>
-    <h2>Table</h2>
+    <div class="row" style="justify-content:space-between; margin-bottom:10px">
+      <h2 style="margin:0">Table</h2>
+      <span class="row"><label class="hint" for="second">Second Seat</label>
+        <select id="second" aria-label="Who takes the second seat"><option value="none">Empty</option><option value="you">You</option><option value="laya">Laya</option></select></span>
+    </div>
     <div class="felt">
       <div class="seat"><div><div class="who">Dealer</div><div class="total" id="dealerTotal">&nbsp;</div></div>
         <div class="cards" id="dealerCards"></div></div>
-      <div class="seat"><div><div class="who">Laya</div><div class="total" id="playerTotal">&nbsp;</div><div class="bet" id="bet" hidden></div></div>
+      <div class="seat"><div><div class="who" id="layaWho">Laya</div><div class="total" id="playerTotal">&nbsp;</div><div class="bet" id="bet" hidden></div></div>
         <div class="cards" id="playerCards"></div></div>
+      <div class="seat" id="yourSeat" hidden><div><div class="who" id="yourWho">You</div><div class="total" id="yourTotal">&nbsp;</div><div class="bet">bet 1</div></div>
+        <div><div class="cards" id="yourCards"></div>
+          <div class="row" id="yourButtons" style="margin-top:8px">
+            <button class="primary" id="hit" disabled>Hit</button><button id="stand" disabled>Stand</button><button id="double" disabled>Double</button>
+          </div></div></div>
       <div class="outcome" id="outcome"></div>
+      <div class="outcome" id="yourOutcome"></div>
     </div>
     <div class="row controls">
       <span class="hint" id="hint">One deck &middot; dealer stands on 17 &middot; blackjack pays 3 to 2 &middot; double on 9, 10 or 11</span>
@@ -150,8 +160,10 @@
       <div class="stat"><b id="net">0</b><span>net units won</span></div>
       <div class="stat"><b id="flat">0</b><span>same play, always betting 1</span></div>
       <div class="stat"><b id="record">0 / 0 / 0</b><span>won / pushed / lost</span></div>
+      <div class="stat" id="yourNetStat" hidden><b id="yourNet">0</b><span id="yourNetLabel">you: net units won</span></div>
+      <div class="stat" id="yourRecordStat" hidden><b id="yourRecord">0 / 0 / 0</b><span id="yourRecordLabel">you: won / pushed / lost</span></div>
     </div>
-    <div class="row controls"><span class="hint">Scores are kept until reset.</span><button class="small" id="resetScores">Reset Scores</button></div>
+    <div class="row controls"><span class="hint">Scores are kept until reset. At the table you always bet 1; Laya sizes its bet from the cards it remembers.</span><button class="small" id="resetScores">Reset Scores</button></div>
     <div class="error" id="error" hidden></div>
 
     <div class="block">
@@ -215,23 +227,47 @@ const QUESTIONS = {
 
 let auto = true, playing = false, looping = false, forget = false;
 let shoe = new Shoe(Date.now() & 0xfffff);
-const fresh = () => ({ hands: 0, net: 0, flat: 0, won: 0, pushed: 0, lost: 0, decisions: 0, matched: 0 });
+const fresh = () => ({ hands: 0, net: 0, flat: 0, won: 0, pushed: 0, lost: 0, decisions: 0, matched: 0,
+                       yours: { net: 0, won: 0, pushed: 0, lost: 0 } });
+// A person at the table: their hand is dealt from the same deck and played with the buttons,
+// after Laya's. `choose` is how a pressed button reaches the hand being played.
+let choose = null;
+const yourMove = (canDoubleNow) => new Promise((resolve) => {
+  $("hit").disabled = $("stand").disabled = false; $("double").disabled = !canDoubleNow;
+  choose = (action) => { choose = null; for (const id of ["hit", "stand", "double"]) $(id).disabled = true; resolve(action); };
+});
 let stats = fresh();
 const recent = [];
 
 class NotLoaded extends Error {}
 
-async function ask(kind, seen) {
+async function ask(kind, seen, model = picker.name) {
   const sent = performance.now();
   const response = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: picker.name, max_len: picker.budget, state: seen, questions: { rule: QUESTIONS[kind].question } }) });
+    body: JSON.stringify({ model, max_len: picker.budgetFor(model), state: seen, questions: { rule: QUESTIONS[kind].question } }) });
   const body = await response.json();
   if (body.not_loaded) throw new NotLoaded(body.error);
   if (body.error) throw new Error(body.error);
-  picker.report(body.usage);
-  recent.push({ mla: body.usage.mla_ms, trip: performance.now() - sent });
-  while (recent.length > 40) recent.shift();
+  if (model === picker.name) {             // the figures on the page are the page's own model's
+    picker.report(body.usage);
+    recent.push({ mla: body.usage.mla_ms, trip: performance.now() - sent });
+    while (recent.length > 40) recent.shift();
+  }
   return body.answers.rule;
+}
+
+// The second seat: empty, a person's, or another loaded model's. A model there plays its hand
+// by the same two questions Laya is asked (double? then hit or stand?), at a flat bet of 1.
+const second = () => $("second").value;
+const rivalModel = () => picker.seatModel($("second"));
+const rivalName = () => second() !== "laya" ? "You" : rivalModel() === picker.name ? "Another " + picker.short(rivalModel()) : picker.short(rivalModel());
+async function rivalMove(cards, upcard, model) {
+  const { total, soft } = handValue(cards);
+  if (canDouble(cards)) {
+    const answer = await ask("double", doubleFacts(total, soft, upcard, shoe.valueOdds()), model);
+    if (DOUBLE_ACTIONS[answer.choice] === "double") return "double";
+  }
+  return PLAY_ACTIONS[(await ask("play", playFacts(total, soft, upcard, shoe.valueOdds()), model)).choice];
 }
 
 // One decision during play: ask, count it, show it.
@@ -253,7 +289,16 @@ function drawCards(root, cards, hideSecond) {
          el("span", { textContent: RANKS[card.rank] }), el("span", { className: "suit", textContent: SUITS[card.suit] }))));
 }
 
-function showTable(player, dealer, hideHole) {
+function showTable(player, dealer, hideHole, you = null) {
+  $("yourSeat").hidden = !you;
+  $("layaWho").textContent = picker.short(picker.name);
+  $("yourWho").textContent = rivalName();
+  $("yourButtons").hidden = second() === "laya";
+  if (you) {
+    drawCards($("yourCards"), you, false);
+    const yours = handValue(you);
+    $("yourTotal").textContent = you.length ? (yours.soft && yours.total < 21 ? "soft " : "") + yours.total : "\u00a0";
+  }
   drawCards($("playerCards"), player, false);
   drawCards($("dealerCards"), dealer, hideHole);
   const mine = handValue(player);
@@ -302,6 +347,12 @@ function showStats() {
   $("net").textContent = signed(stats.net);
   $("flat").textContent = signed(stats.flat);
   $("record").textContent = `${stats.won} / ${stats.pushed} / ${stats.lost}`;
+  $("yourNetStat").hidden = $("yourRecordStat").hidden = second() === "none";
+  const who = second() === "laya" ? rivalName() : "you";
+  $("yourNetLabel").textContent = `${who}: net units won`;
+  $("yourRecordLabel").textContent = `${who}: won / pushed / lost`;
+  $("yourNet").textContent = signed(stats.yours.net);
+  $("yourRecord").textContent = `${stats.yours.won} / ${stats.yours.pushed} / ${stats.yours.lost}`;
   $("count").textContent = stats.decisions.toLocaleString();
   $("matched").textContent = stats.decisions ? `${stats.matched} of ${stats.decisions}` : "\u2013";
   $("perHand").textContent = stats.hands ? (stats.decisions / stats.hands).toFixed(1) : "\u2013";
@@ -319,6 +370,9 @@ async function playHand() {
   const take = (cards) => { const card = shoe.draw(); cards.push(card); return card; };
   const show = (card) => { shoe.remember(card); showMemory(); };
   let player = [], dealer = [], stake = 1, bet = 1;
+  const you = second() === "none" ? null : [];      // the second seat's hand, if somebody sits there
+  const rival = second() === "laya" ? rivalModel() : null, seated = rivalName();
+  let yourStake = 1;
   try {
     if (forget || shoe.needsShuffle) {
       shoe.shuffle(); forget = false;
@@ -326,13 +380,17 @@ async function playHand() {
       $("hint").textContent = "Shuffled: the memory starts again";
     }
     $("outcome").textContent = ""; $("outcome").className = "outcome";
-    showTable([], [], true);
+    $("yourOutcome").textContent = ""; $("yourOutcome").className = "outcome";
+    showTable([], [], true, you);
     bet = BET_UNITS[await decide("bet", betFacts(shoe.trueCount))];
     $("bet").hidden = false; $("bet").textContent = `bet ${bet}`;
     await pace();
-    show(take(player)); show(take(dealer)); show(take(player)); take(dealer);      // the hole card stays unseen
+    show(take(player)); if (you) show(take(you));
+    show(take(dealer));
+    show(take(player)); if (you) show(take(you));
+    take(dealer);                                                                  // the hole card stays unseen
     const upcard = cardValue(dealer[0]);
-    showTable(player, dealer, true);
+    showTable(player, dealer, true, you);
     await pace();
     if (!isBlackjack(player) && !isBlackjack(dealer)) {
       const first = handValue(player);
@@ -342,7 +400,7 @@ async function playHand() {
         $("hint").textContent = `On ${first.total} against ${against(dealer[0])}: double`;
         await pace();
         show(take(player));
-        showTable(player, dealer, true);
+        showTable(player, dealer, true, you);
         await pace();
       } else {
         for (;;) {
@@ -353,14 +411,30 @@ async function playHand() {
           await pace();
           if (action === "stand") break;
           show(take(player));
-          showTable(player, dealer, true);
+          showTable(player, dealer, true, you);
           await pace();
         }
+      }
+    }
+    // Then the person, with the buttons. Their cards are on the table, so Laya's memory has them too.
+    if (you && !isBlackjack(you) && !isBlackjack(dealer)) {
+      for (;;) {
+        const { total, soft } = handValue(you);
+        if (total >= 21) break;
+        $("hint").textContent = `${rival ? seated + "'s" : "Your"} turn: ${soft ? "soft" : "hard"} ${total} against ${against(dealer[0])}`;
+        const action = rival ? await rivalMove(you, upcard, rival) : await yourMove(canDouble(you));
+        if (rival) { $("hint").textContent = `${seated}, on ${soft ? "soft" : "hard"} ${total} against ${against(dealer[0])}: ${action}`; await pace(); }
+        if (action === "stand") break;
+        if (action === "double") yourStake = 2;
+        show(take(you));
+        showTable(player, dealer, true, you);
+        if (action === "double") break;
       }
     }
   } catch (error) {
     playing = false;
     forget = true;                       // the hand was abandoned: start the next from a fresh deck
+    choose = null; for (const id of ["hit", "stand", "double"]) $(id).disabled = true;
     if (error instanceof NotLoaded) return picker.lost();
     $("error").hidden = false; $("error").textContent = error.message;
     setAuto(false);
@@ -368,16 +442,27 @@ async function playHand() {
   }
   $("error").hidden = true;
   show(dealer[1]);
-  showTable(player, dealer, false);
+  showTable(player, dealer, false, you);
   await pace();
-  if (handValue(player).total <= 21 && !isBlackjack(player)) {
-    while (handValue(dealer).total < 17) { show(take(dealer)); showTable(player, dealer, false); await pace(); }
+  // The dealer draws if anybody at the table still has a hand to beat.
+  const live = (cards) => cards && handValue(cards).total <= 21 && !isBlackjack(cards);
+  if (live(player) || live(you)) {
+    while (handValue(dealer).total < 17) { show(take(dealer)); showTable(player, dealer, false, you); await pace(); }
+  }
+  if (you) {
+    const yours = settle(you, dealer) * yourStake, total = handValue(you).total;
+    stats.yours.net += yours;
+    stats.yours[yours > 0 ? "won" : yours < 0 ? "lost" : "pushed"]++;
+    const plural = rival ? "s" : "";
+    $("yourOutcome").textContent = (isBlackjack(you) && yours > 0 ? `${seated}: blackjack` : total > 21 ? `${seated}: bust` : yours > 0 ? `${seated} win${plural}` : yours < 0 ? `${seated} lose${plural}` : `${seated} push${rival ? "es" : ""}`)
+      + (yours ? ", " + signed(yours).replace("-", "\u2212") : "");
+    $("yourOutcome").className = "outcome " + (yours > 0 ? "win" : yours < 0 ? "loss" : "push");
   }
   const units = settle(player, dealer) * stake;
   stats.hands++; stats.net += units * bet; stats.flat += units;
   if (units > 0) stats.won++; else if (units < 0) stats.lost++; else stats.pushed++;
   const mine = handValue(player).total, won = units * bet;
-  $("outcome").textContent = (isBlackjack(player) && units > 0 ? "Blackjack" : mine > 21 ? "Bust" : units > 0 ? "Laya wins" : units < 0 ? "Dealer wins" : "Push")
+  $("outcome").textContent = (isBlackjack(player) && units > 0 ? "Blackjack" : mine > 21 ? "Bust" : units > 0 ? `${picker.short(picker.name)} wins` : units < 0 ? "Dealer wins" : "Push")
     + (won ? ", " + signed(won).replace("-", "\u2212") : "");
   $("outcome").className = "outcome " + (units > 0 ? "win" : units < 0 ? "loss" : "push");
   showStats();
@@ -432,7 +517,7 @@ async function setReady(ready) {
   $("deal").disabled = $("auto").disabled = !ready;
   if (!ready) {
     $("outcome").className = "outcome push";
-    $("outcome").textContent = "No model is on the MLA. Load one in the Models tab; play starts by itself.";
+    $("outcome").textContent = "No model is on the MLA. Load one in Settings; play starts by itself.";
     return;
   }
   $("outcome").textContent = "";
@@ -445,6 +530,22 @@ async function setReady(ready) {
 }
 
 $("deal").onclick = () => { setAuto(false); playHand(); };
+for (const id of ["hit", "stand", "double"]) $(id).onclick = () => { if (choose) choose(id); };
+// H, S and D play your hand from the keyboard.
+addEventListener("keydown", (event) => {
+  const id = { h: "hit", s: "stand", d: "double" }[event.key.toLowerCase()];
+  if (id && choose && !$(id).disabled && !event.ctrlKey && !event.metaKey && !event.altKey
+      && !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) choose(id);
+});
+try { if (localStorage.getItem("laya.blackjack.join") === "1") $("second").value = "you"; } catch (_) { /* not kept */ }
+$("second").onchange = () => {
+  try { localStorage.setItem("laya.blackjack.join", second() === "you" ? "1" : "0"); } catch (_) { /* not kept */ }
+  stats.yours = { net: 0, won: 0, pushed: 0, lost: 0 };
+  $("hint").textContent = second() === "you" ? "You are dealt in from the next hand: Hit, Stand or Double (H, S, D) after Laya has played"
+    : second() === "laya" ? `${rivalName()} is dealt in from the next hand, at a flat bet of 1, and plays after ${picker.short(picker.name)}`
+    : "The second seat is empty after this hand";
+  showStats();
+};
 $("auto").onclick = () => setAuto(!auto);
 $("resetScores").onclick = () => { stats = fresh(); recent.length = 0; showStats(); };
 $("resetCount").onclick = () => {
@@ -457,6 +558,7 @@ $("resetCount").onclick = () => {
 showMemory();
 showStats();
 const picker = createModelPicker({ mount: $("picker"), onReady: setReady });
+picker.seats($("second"));
 </script>
 </body>
 </html>
