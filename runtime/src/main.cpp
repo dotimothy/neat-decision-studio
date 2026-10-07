@@ -43,10 +43,12 @@ commands:
   hidden  diagnostic: dump the encoder hidden state from an encoder-only ELF
             --elf FILE --seq-len N --input FILE --out FILE
 
-a CLM model directory (one with clm_config.json) takes run, bench and serve as above, and
+a CLM model directory (one with clm_config.json) takes run, bench and serve as above
+(bench: --texts N times N texts of --tokens each, laid end to end in one pass), and
   hidden  write the last token's hidden state of token sequences, float32 [case][hidden]
             --input FILE     {"cases": [{"ids": [...]}, ...]}
             --out FILE
+            --packed 1       lay the cases end to end, in as few passes as they fit
 
 options:
   --seq-lens LIST    load only these compiled sequence lengths, e.g. 128,512
@@ -238,20 +240,27 @@ int clm_run(clm::Runtime& runtime, const Args& args) {
   return 0;
 }
 
-// Time the encoder: one pass through every graph, for a text of `tokens` tokens.
+// Time the encoder: one pass through a chain, for one text of `tokens` tokens, or with
+// --texts N that many of them laid end to end in the one pass.
 int clm_bench(clm::Runtime& runtime, const Args& args) {
   const auto& cfg = runtime.config();
-  const uint32_t tokens = static_cast<uint32_t>(std::stoul(args.get("tokens", std::to_string(cfg.seq_len))));
+  const uint32_t pinned = static_cast<uint32_t>(std::stoul(args.get("seq-len", "0")));
+  const uint32_t texts = static_cast<uint32_t>(std::stoul(args.get("texts", "1")));
+  const uint32_t room = pinned ? pinned : runtime.max_tokens();
+  const uint32_t tokens = static_cast<uint32_t>(std::stoul(args.get("tokens", std::to_string(room / std::max(texts, 1u)))));
   const int iters = std::stoi(args.get("iters", "10"));
-  if (!tokens || tokens > cfg.seq_len) throw std::invalid_argument("bench: tokens must be within the compiled length");
-  std::vector<uint32_t> ids(tokens, 1000);
+  if (!tokens || !texts || size_t(tokens) * texts > room)
+    throw std::invalid_argument("bench: the texts must fit the chain they are timed on");
+  const std::vector<std::vector<uint32_t>> ids(texts, std::vector<uint32_t>(tokens, 1000 % cfg.vocab_size));
   std::vector<double> mla, pre;
+  uint32_t seq_len = 0;
   for (int i = 0; i < iters + 1; ++i) {
-    double pre_ms = 0, mla_ms = 0;
-    runtime.hidden(ids, &pre_ms, &mla_ms);
+    clm::Cost cost;
+    runtime.pass(ids, cost, pinned);
+    seq_len = cost.seq_len;
     if (i < 1) continue;
-    mla.push_back(mla_ms);
-    pre.push_back(pre_ms);
+    mla.push_back(cost.mla_ms);
+    pre.push_back(cost.pre_ms);
   }
   auto stats = [](std::vector<double> values) {
     std::sort(values.begin(), values.end());
@@ -259,30 +268,34 @@ int clm_bench(clm::Runtime& runtime, const Args& args) {
     auto ms = [](double value) { return std::round(value * 1e3) / 1e3; };
     return json{{"mean", ms(mean)}, {"p50", ms(values[values.size() / 2])}, {"min", ms(values.front())}, {"max", ms(values.back())}};
   };
-  std::cout << json{{"tokens", tokens}, {"seq_len", cfg.seq_len}, {"graphs", cfg.elfs.size()}, {"iters", iters},
-                    {"precision", cfg.precision}, {"mla_ms", stats(mla)}, {"pre_ms", stats(pre)}}.dump(2)
+  std::cout << json{{"texts", texts}, {"tokens_each", tokens}, {"seq_len", seq_len}, {"loaded_seq_lens", runtime.seq_lens()},
+                    {"graphs", cfg.elfs.at(seq_len).size()}, {"iters", iters}, {"precision", cfg.precision},
+                    {"mla_ms", stats(mla)}, {"pre_ms", stats(pre)}}.dump(2)
             << std::endl;
   return 0;
 }
 
+// The last token's hidden state of each case, float32 [case][hidden]: one pass a case, or
+// with --packed 1 laid end to end in as few passes as they fit, to see that the two agree.
 int clm_hidden(clm::Runtime& runtime, const Args& args) {
   const json input = json::parse(read_file(args.get("input")));
   std::ofstream out(args.get("out"), std::ios::binary);
   if (!out) throw std::runtime_error("cannot write " + args.get("out"));
-  size_t cases = 0;
-  double mla_ms = 0;
-  for (const auto& item : input.at("cases")) {
-    const auto hidden = runtime.hidden(item.at("ids").get<std::vector<uint32_t>>(), nullptr, &mla_ms);
+  std::vector<std::vector<uint32_t>> texts;
+  for (const auto& item : input.at("cases")) texts.push_back(item.at("ids").get<std::vector<uint32_t>>());
+  clm::Cost cost;
+  const bool packed = args.get("packed", "0") == "1";
+  for (const auto& hidden : runtime.encode(texts, cost, packed))
     out.write(reinterpret_cast<const char*>(hidden.data()), hidden.size() * sizeof(float));
-    ++cases;
-  }
-  std::cout << json{{"cases", cases}, {"mla_ms_mean", cases ? mla_ms / cases : 0.0}, {"out", args.get("out")}}.dump() << std::endl;
+  std::cout << json{{"cases", texts.size()}, {"packed", packed}, {"passes", cost.passes}, {"mla_ms", cost.mla_ms},
+                    {"mla_ms_mean", texts.empty() ? 0.0 : cost.mla_ms / texts.size()}, {"out", args.get("out")}}.dump()
+            << std::endl;
   return 0;
 }
 
 int clm_serve(clm::Runtime& runtime) {
   runtime.warm_up();
-  std::cout << json{{"ready", true}, {"seq_lens", {runtime.config().seq_len}}}.dump() << std::endl;
+  std::cout << json{{"ready", true}, {"seq_lens", runtime.seq_lens()}}.dump() << std::endl;
   for (std::string line; std::getline(std::cin, line);) {
     if (line.find_first_not_of(" \t\r") == std::string::npos) continue;
     json response;
@@ -299,7 +312,7 @@ int clm_serve(clm::Runtime& runtime) {
 }
 
 int clm_main(const Args& args) {
-  clm::Runtime runtime(args.model_dir);
+  clm::Runtime runtime(args.model_dir, parse_list(args.get("seq-lens")));
   if (args.command == "run") return clm_run(runtime, args);
   if (args.command == "bench") return clm_bench(runtime, args);
   if (args.command == "serve") return clm_serve(runtime);

@@ -30,6 +30,16 @@ double elapsed_ms(Clock::time_point start) {
   return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
 }
 
+uint16_t to_bf16(float value) {
+  uint32_t bits;
+  std::memcpy(&bits, &value, sizeof(bits));
+  return static_cast<uint16_t>((bits + 0x7fffu + ((bits >> 16) & 1u)) >> 16);
+}
+
+// Large enough that exp() underflows to exactly 0, small enough to stay finite in bfloat16
+// once an attention logit is added to it; see MASK_NEG in clm_sima/hostio.py.
+constexpr float kMaskNeg = -30000.0f;
+
 float from_bf16(uint16_t value) {
   const uint32_t bits = static_cast<uint32_t>(value) << 16;
   float result;
@@ -51,7 +61,6 @@ Config load_config(const fs::path& path) {
   Config cfg;
   cfg.hidden_size = j.at("hidden_size");
   cfg.vocab_size = j.at("vocab_size");
-  cfg.seq_len = j.at("seq_len");
   cfg.model = j.value("model", "clm");
   cfg.precision = j.value("precision", "");
   cfg.token_embeddings = j.at("token_embeddings");
@@ -59,7 +68,8 @@ Config load_config(const fs::path& path) {
   if (j.at("heads").is_null())
     throw std::runtime_error("clm_config.json names no heads; build the model directory with --heads");
   cfg.heads = j.at("heads");
-  cfg.elfs = j.at("elfs").get<std::vector<std::string>>();
+  for (const auto& [seq_len, files] : j.at("elfs").items())
+    cfg.elfs[static_cast<uint32_t>(std::stoul(seq_len))] = files.get<std::vector<std::string>>();
   if (cfg.elfs.empty()) throw std::runtime_error("clm_config.json lists no compiled graphs");
   return cfg;
 }
@@ -239,23 +249,31 @@ std::vector<float> Head::project(const std::vector<float>& embedding) const {
   return y;
 }
 
-// The compiled graphs and the buffers between them: graph i reads buffer i and writes buffer
-// i + 1, so nothing is copied on the way. Buffers are token-major, [position][channel].
+// One sequence length: its graphs and the buffers between them. Graph i reads buffer i and
+// writes buffer i + 1, so nothing is copied on the way, and every graph reads the one mask.
+// Buffers are token-major, [position][channel]; the mask is therefore [query][key], the
+// transpose of the graph's NCHW (1, key, 1, query).
 struct Runtime::Chain {
+  uint32_t seq_len;
   std::vector<std::unique_ptr<llima::MLABuffer>> buffers;
+  llima::MLABuffer mask;
   std::vector<std::unique_ptr<llima::MLAModelWithBuffer>> models;
+  std::vector<size_t> masked_for;  // the text lengths the mask currently holds
 
-  Chain(const fs::path& dir, const Config& cfg) {
-    for (size_t i = 0; i <= cfg.elfs.size(); ++i) {
+  Chain(const fs::path& dir, const Config& cfg, uint32_t s, const std::vector<std::string>& elfs)
+      : seq_len(s), mask(fmt::format("clm_mask_{}", s), {s, s}, "bfloat16", true) {
+    mask.allocate();
+    mask.clear();
+    for (size_t i = 0; i <= elfs.size(); ++i) {
       buffers.push_back(std::make_unique<llima::MLABuffer>(
-          fmt::format("clm_hidden_{}", i), std::vector<size_t>{cfg.seq_len, cfg.hidden_size}, "bfloat16", true));
+          fmt::format("clm_hidden_{}_{}", s, i), std::vector<size_t>{s, cfg.hidden_size}, "bfloat16", true));
       buffers.back()->allocate();
       buffers.back()->clear();
     }
-    for (size_t i = 0; i < cfg.elfs.size(); ++i) {
-      const fs::path elf = dir / cfg.elfs[i];
+    for (size_t i = 0; i < elfs.size(); ++i) {
+      const fs::path elf = dir / elfs[i];
       models.push_back(std::make_unique<llima::MLAModelWithBuffer>(
-          elf, std::vector<llima::MLABufferSlice>{llima::MLABufferSlice(buffers[i].get())},
+          elf, std::vector<llima::MLABufferSlice>{llima::MLABufferSlice(buffers[i].get()), llima::MLABufferSlice(&mask)},
           std::vector<llima::MLABufferSlice>{llima::MLABufferSlice(buffers[i + 1].get())}));
       evict_page_cache(elf);   // also before: a previous run may have left it cached
       models.back()->load();
@@ -263,9 +281,27 @@ struct Runtime::Chain {
     }
   }
   ~Chain() { for (auto& model : models) model->free(); }
+
+  // Texts of these lengths laid end to end: a query sees the keys of its own text at or
+  // before it. A position past the last text sees itself only; nothing reads its output.
+  void set_mask(const std::vector<size_t>& lengths) {
+    if (lengths == masked_for) return;
+    const uint16_t open = to_bf16(0.0f), closed = to_bf16(kMaskNeg);
+    std::vector<uint16_t> rows(size_t(seq_len) * seq_len, closed);
+    for (uint32_t pos = 0; pos < seq_len; ++pos) rows[size_t(pos) * seq_len + pos] = open;
+    size_t start = 0;
+    for (size_t length : lengths) {
+      for (size_t query = start; query < start + length; ++query)
+        for (size_t key = start; key <= query; ++key) rows[query * seq_len + key] = open;
+      start += length;
+    }
+    mask.upload(rows.data());
+    masked_for = lengths;
+  }
 };
 
-Runtime::Runtime(const fs::path& model_dir) : _cfg(load_config(model_dir / "clm_config.json")) {
+Runtime::Runtime(const fs::path& model_dir, const std::vector<uint32_t>& seq_lens)
+    : _cfg(load_config(model_dir / "clm_config.json")) {
   _tokenizer = llima::Tokenizer::from_hf_json(model_dir / _cfg.tokenizer);
 
   const fs::path table = model_dir / _cfg.token_embeddings;
@@ -296,93 +332,141 @@ Runtime::Runtime(const fs::path& model_dir) : _cfg(load_config(model_dir / "clm_
     throw std::runtime_error("the heads were made for another encoder width");
 
   if (g_runtimes++ == 0) llima::connect_mla_rt({});
-  _chain = std::make_unique<Chain>(model_dir, _cfg);
+  for (const auto& [seq_len, elfs] : _cfg.elfs) {
+    if (!seq_lens.empty() && std::find(seq_lens.begin(), seq_lens.end(), seq_len) == seq_lens.end()) continue;
+    _chains[seq_len] = std::make_unique<Chain>(model_dir, _cfg, seq_len, elfs);
+  }
+  if (_chains.empty()) throw std::runtime_error("no compiled chain was loaded from " + model_dir.string());
 }
 
 Runtime::~Runtime() {
-  _chain.reset();
+  _chains.clear();
   if (--g_runtimes == 0) llima::disconnect_mla_rt();
   if (_embeddings) munmap(const_cast<uint16_t*>(_embeddings), _embeddings_bytes);
 }
+
+std::vector<uint32_t> Runtime::seq_lens() const {
+  std::vector<uint32_t> result;
+  for (const auto& entry : _chains) result.push_back(entry.first);
+  return result;
+}
+
+uint32_t Runtime::max_tokens() const { return _chains.rbegin()->first; }
 
 std::vector<uint32_t> Runtime::tokenize(const std::string& text) const {
   return _tokenizer->encode(text, false);
 }
 
-std::vector<float> Runtime::hidden(const std::vector<uint32_t>& ids, double* pre_ms, double* mla_ms) {
-  const uint32_t s = _cfg.seq_len, width = _cfg.hidden_size;
-  if (ids.empty() || ids.size() > s)
-    throw std::invalid_argument(fmt::format("{} tokens do not fit the {}-token graphs", ids.size(), s));
+std::vector<std::vector<float>> Runtime::pass(const std::vector<std::vector<uint32_t>>& texts, Cost& cost, uint32_t seq_len) {
+  size_t total = 0;
+  std::vector<size_t> lengths;
+  for (const auto& ids : texts) {
+    if (ids.empty()) throw std::invalid_argument("a text to embed is empty");
+    lengths.push_back(ids.size());
+    total += ids.size();
+  }
+  const auto found = seq_len ? _chains.find(seq_len) : _chains.lower_bound(static_cast<uint32_t>(total));
+  if (found == _chains.end() || total > found->first)
+    throw std::invalid_argument(seq_len ? fmt::format("{} tokens do not fit a loaded {}-token chain", total, seq_len)
+                                        : fmt::format("{} tokens exceed the longest loaded chain ({})", total, max_tokens()));
+  Chain& chain = *found->second;
+  const uint32_t width = _cfg.hidden_size;
+
   auto stage = Clock::now();
-  // Attention is causal, so what lies to the right of the text cannot reach it: the rest of the
-  // buffer is left as it is.
-  llima::MLABuffer& first = *_chain->buffers.front();
+  llima::MLABuffer& first = *chain.buffers.front();
   auto* rows = static_cast<uint16_t*>(first.get_virtual_addr());
-  for (size_t pos = 0; pos < ids.size(); ++pos) {
-    if (ids[pos] >= _cfg.vocab_size) throw std::invalid_argument(fmt::format("token id {} out of range", ids[pos]));
-    std::memcpy(rows + pos * width, _embeddings + size_t(ids[pos]) * width, width * sizeof(uint16_t));
+  size_t pos = 0;
+  for (const auto& ids : texts) {
+    for (uint32_t id : ids) {
+      if (id >= _cfg.vocab_size) throw std::invalid_argument(fmt::format("token id {} out of range", id));
+      std::memcpy(rows + pos++ * width, _embeddings + size_t(id) * width, width * sizeof(uint16_t));
+    }
   }
   first.flush_cache();
-  if (pre_ms) *pre_ms += elapsed_ms(stage);
+  chain.set_mask(lengths);
+  cost.pre_ms += elapsed_ms(stage);
 
   stage = Clock::now();
-  for (auto& model : _chain->models) model->run();
-  if (mla_ms) *mla_ms += elapsed_ms(stage);
+  for (auto& model : chain.models) model->run();
+  cost.mla_ms += elapsed_ms(stage);
+  cost.passes++;
+  cost.seq_len = std::max(cost.seq_len, chain.seq_len);
 
-  const llima::MLABuffer& last = *_chain->buffers.back();
+  const llima::MLABuffer& last = *chain.buffers.back();
   last.invalidate_cache();
-  const auto* out = static_cast<const uint16_t*>(last.get_virtual_addr()) + (ids.size() - 1) * width;
-  std::vector<float> result(width);
-  std::transform(out, out + width, result.begin(), from_bf16);
+  const auto* out = static_cast<const uint16_t*>(last.get_virtual_addr());
+  std::vector<std::vector<float>> result;
+  size_t end = 0;
+  for (size_t length : lengths) {
+    end += length;
+    result.emplace_back(width);
+    std::transform(out + (end - 1) * width, out + end * width, result.back().begin(), from_bf16);
+  }
   return result;
 }
 
-Embedded Runtime::embed(const std::string& text) {
-  Embedded embedded;
-  auto stage = Clock::now();
-  std::vector<uint32_t> ids = tokenize(text);
-  embedded.tokenize_ms = elapsed_ms(stage);
-  if (ids.empty()) throw std::invalid_argument("a text to embed is empty");
-  if (ids.size() > _cfg.seq_len) {     // the question is at the end: keep the end
-    embedded.dropped = ids.size() - _cfg.seq_len;
-    ids.erase(ids.begin(), ids.begin() + embedded.dropped);
+std::vector<std::vector<float>> Runtime::encode(std::vector<std::vector<uint32_t>> texts, Cost& cost, bool packed) {
+  const size_t longest = max_tokens();
+  for (auto& ids : texts) {
+    if (ids.empty()) throw std::invalid_argument("a text to embed is empty");
+    if (ids.size() > longest) {            // the question is at the end: keep the end
+      cost.dropped = std::max(cost.dropped, ids.size() - longest);
+      ids.erase(ids.begin(), ids.end() - longest);
+    }
+    cost.tokens = std::max(cost.tokens, ids.size());
   }
-  embedded.tokens = ids.size();
-  embedded.hidden = hidden(ids, &embedded.pre_ms, &embedded.mla_ms);
-  return embedded;
+  cost.texts += texts.size();
+  std::vector<std::vector<float>> result(texts.size());
+  if (!packed) {
+    for (size_t i = 0; i < texts.size(); ++i) result[i] = std::move(pass({texts[i]}, cost)[0]);
+    return result;
+  }
+
+  // Which texts share a pass. For each chain length that could hold the longest text: put the
+  // texts, longest first, each into the first pass it fits; a pass then runs on the shortest
+  // chain that holds it. Take the length whose passes cost least by what warm-up measured
+  // (or, unmeasured, by their positions).
+  std::vector<size_t> order(texts.size());
+  for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+  std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return texts[a].size() > texts[b].size(); });
+  const auto price = [&](uint32_t seq_len) {
+    const auto measured = _pass_ms.find(seq_len);
+    return measured != _pass_ms.end() ? measured->second : double(seq_len);
+  };
+  std::vector<std::vector<size_t>> best;
+  double best_cost = 0;
+  for (const auto& [capacity, chain] : _chains) {
+    if (texts[order.front()].size() > capacity) continue;
+    std::vector<std::vector<size_t>> bins;
+    std::vector<size_t> used;
+    for (size_t i : order) {
+      size_t bin = 0;
+      while (bin < bins.size() && used[bin] + texts[i].size() > capacity) ++bin;
+      if (bin == bins.size()) { bins.emplace_back(); used.push_back(0); }
+      bins[bin].push_back(i);
+      used[bin] += texts[i].size();
+    }
+    double total = 0;
+    for (size_t tokens : used) total += price(_chains.lower_bound(static_cast<uint32_t>(tokens))->first);
+    if (best.empty() || total < best_cost) { best = std::move(bins); best_cost = total; }
+  }
+  for (const auto& bin : best) {
+    std::vector<std::vector<uint32_t>> together;
+    for (size_t i : bin) together.push_back(texts[i]);
+    auto hidden = pass(together, cost);
+    for (size_t k = 0; k < bin.size(); ++k) result[bin[k]] = std::move(hidden[k]);
+  }
+  return result;
 }
 
 void Runtime::warm_up() {
-  embed("Is this a warm-up?");
-}
-
-const std::vector<float>& Runtime::projected(bool is_state, const std::string& text, json& totals) {
-  const std::string key = (is_state ? "s:" : "a:") + text;
-  if (const auto found = _cache.find(key); found != _cache.end()) {
-    _recent.splice(_recent.end(), _recent, found->second);
-    totals["cached"] = totals["cached"].get<size_t>() + 1;
-    return found->second->vector;
+  const std::vector<uint32_t> ids = tokenize("Is this a warm-up?");
+  for (const auto& [seq_len, chain] : _chains) {
+    Cost first, timed;
+    pass({ids}, first, seq_len);
+    pass({ids}, timed, seq_len);
+    _pass_ms[seq_len] = timed.mla_ms + timed.pre_ms;
   }
-  Embedded embedded = embed(text);
-  const auto stage = Clock::now();
-  normalise(embedded.hidden);
-  std::vector<float> vector = (is_state ? _state_head : _action_head).project(embedded.hidden);
-  totals["post_ms"] = totals["post_ms"].get<double>() + elapsed_ms(stage);
-  totals["tokenize_ms"] = totals["tokenize_ms"].get<double>() + embedded.tokenize_ms;
-  totals["pre_ms"] = totals["pre_ms"].get<double>() + embedded.pre_ms;
-  totals["mla_ms"] = totals["mla_ms"].get<double>() + embedded.mla_ms;
-  totals["encoder_passes"] = totals["encoder_passes"].get<size_t>() + 1;
-  if (is_state) {
-    totals["tokens"] = std::max(totals["tokens"].get<size_t>(), embedded.tokens);
-    totals["state_tokens_dropped"] = std::max(totals["state_tokens_dropped"].get<size_t>(), embedded.dropped);
-  }
-  if (_cache.size() >= _cache_capacity) {
-    _cache.erase(_recent.front().key);
-    _recent.pop_front();
-  }
-  _recent.push_back({key, std::move(vector)});
-  _cache[key] = std::prev(_recent.end());
-  return _recent.back().vector;
 }
 
 json Runtime::predict(const json& state, const json& questions, double temperature) {
@@ -390,21 +474,65 @@ json Runtime::predict(const json& state, const json& questions, double temperatu
     throw std::invalid_argument("questions must be a non-empty object of id -> question");
   if (!(temperature > 0 && temperature <= 100)) throw std::invalid_argument("temperature must be in (0, 100]");
 
-  json totals = {{"tokens", size_t(0)}, {"state_tokens_dropped", size_t(0)}, {"encoder_passes", size_t(0)},
-                 {"cached", size_t(0)}, {"tokenize_ms", 0.0}, {"pre_ms", 0.0}, {"mla_ms", 0.0}, {"post_ms", 0.0}};
-  json answers = json::object();
+  // What each question needs embedded: its state text for the state head, its candidates for
+  // the action head. What is not in memory goes through the encoder together.
+  std::vector<std::pair<std::string, Pair>> pairs;
+  std::vector<std::string> missing;   // cache keys, each once
   for (const auto& [qid, qdef] : questions.items()) {
-    Pair pair;
     try {
-      pair = build_pair(state, qdef);
+      pairs.emplace_back(qid, build_pair(state, qdef));
     } catch (const std::exception& error) {
       throw std::invalid_argument(fmt::format("question \"{}\": {}", qid, error.what()));
     }
-    const std::vector<float> zs = projected(true, pair.state_text, totals);   // a copy: the cache may move on
+    const Pair& pair = pairs.back().second;
+    const auto want = [&](const std::string& key) {
+      if (!_cache.contains(key) && std::find(missing.begin(), missing.end(), key) == missing.end()) missing.push_back(key);
+    };
+    want("s:" + pair.state_text);
+    for (const auto& candidate : pair.candidates) want("a:" + candidate);
+  }
+
+  Cost cost;
+  double post_ms = 0;
+  size_t wanted = 0;
+  for (const auto& [qid, pair] : pairs) wanted += 1 + pair.candidates.size();
+  if (!missing.empty()) {
+    auto stage = Clock::now();
+    std::vector<std::vector<uint32_t>> ids;
+    for (const auto& key : missing) {
+      ids.push_back(tokenize(key.substr(2)));
+      if (ids.back().empty()) throw std::invalid_argument("a text to embed is empty");
+    }
+    cost.tokenize_ms = elapsed_ms(stage);
+    auto hidden = encode(std::move(ids), cost);
+    stage = Clock::now();
+    for (size_t i = 0; i < missing.size(); ++i) {
+      normalise(hidden[i]);
+      std::vector<float> vector = (missing[i][0] == 's' ? _state_head : _action_head).project(hidden[i]);
+      // Room is made from what was used longest ago, never from what this request needs.
+      while (_cache.size() >= std::max(_cache_capacity, wanted + 1)) {
+        _cache.erase(_recent.front().key);
+        _recent.pop_front();
+      }
+      _recent.push_back({missing[i], std::move(vector)});
+      _cache[missing[i]] = std::prev(_recent.end());
+    }
+    post_ms += elapsed_ms(stage);
+  }
+  const auto vector_of = [&](const std::string& key) -> const std::vector<float>& {
+    const auto found = _cache.find(key);
+    _recent.splice(_recent.end(), _recent, found->second);
+    return found->second->vector;
+  };
+
+  const auto stage = Clock::now();
+  json answers = json::object();
+  for (const auto& [qid, pair] : pairs) {
+    const std::vector<float>& zs = vector_of("s:" + pair.state_text);
     const size_t k = pair.candidates.size();
     std::vector<double> p(k);
     for (size_t i = 0; i < k; ++i) {
-      const std::vector<float>& za = projected(false, pair.candidates[i], totals);
+      const std::vector<float>& za = vector_of("a:" + pair.candidates[i]);
       double cosine = 0;
       for (size_t j = 0; j < zs.size(); ++j) cosine += double(zs[j]) * za[j];
       p[i] = _scale * cosine / temperature;
@@ -439,26 +567,26 @@ json Runtime::predict(const json& state, const json& questions, double temperatu
     answer["answer_confidence"] = round4(std::clamp(p[best], 0.0, 1.0));
     answers[qid] = answer;
   }
+  post_ms += elapsed_ms(stage);
+
   auto ms = [](double value) { return std::round(value * 1e3) / 1e3; };
-  const double latency = totals["tokenize_ms"].get<double>() + totals["pre_ms"].get<double>() +
-                         totals["mla_ms"].get<double>() + totals["post_ms"].get<double>();
-  const size_t dropped = totals["state_tokens_dropped"];
   return {
       {"answers", answers},
       {"usage",
-       {{"tokens", totals["tokens"]},
-        {"max_len", _cfg.seq_len},
-        {"seq_len", _cfg.seq_len},
-        {"state_tokens_dropped", dropped},
-        {"truncated", dropped > 0},
+       {{"tokens", cost.tokens},
+        {"max_len", max_tokens()},
+        {"seq_len", cost.seq_len ? cost.seq_len : _chains.begin()->first},
+        {"state_tokens_dropped", cost.dropped},
+        {"truncated", cost.dropped > 0},
         {"decisions", questions.size()},
-        {"encoder_passes", totals["encoder_passes"]},
-        {"cached", totals["cached"]},
-        {"tokenize_ms", ms(totals["tokenize_ms"])},
-        {"pre_ms", ms(totals["pre_ms"])},
-        {"mla_ms", ms(totals["mla_ms"])},
-        {"post_ms", ms(totals["post_ms"])},
-        {"latency_ms", ms(latency)}}},
+        {"encoder_passes", cost.passes},
+        {"texts_embedded", cost.texts},
+        {"cached", wanted - missing.size()},
+        {"tokenize_ms", ms(cost.tokenize_ms)},
+        {"pre_ms", ms(cost.pre_ms)},
+        {"mla_ms", ms(cost.mla_ms)},
+        {"post_ms", ms(post_ms)},
+        {"latency_ms", ms(cost.tokenize_ms + cost.pre_ms + cost.mla_ms + post_ms)}}},
   };
 }
 

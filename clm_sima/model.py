@@ -8,29 +8,35 @@ position goes through whole layers together, as in an encoder, and nothing is ca
 
 The graph is in LLiMa's token layout, NCHW with one token per W position:
 
-    input    hidden_in   (1, hidden, 1, S)   token embeddings, or the previous graph's output
+    inputs   hidden_in   (1, hidden, 1, S)   token embeddings, or the previous graph's output
+             mask        (1, S, 1, S)        additive, [key, query]: which positions a query sees
     output   hidden_out  (1, hidden, 1, S)   after this graph's layers; the last graph also
                                              applies the model's final norm
 
-There is no mask input. Attention is causal, so a position never sees what follows it: a text
-shorter than S is padded on the right, and the padding cannot reach the real tokens. The mask
-is therefore a constant of the graph, and the hidden state CLM pools, the last real token's,
-is read out of the output at that token's position.
+The mask is what lets one pass read several texts. Attention is causal, and Qwen3 knows a
+token's place only through RoPE, which turns queries and keys so that their product depends on
+how far apart they are and on nothing else. So texts laid end to end in the S positions, each
+allowed to see only itself (a block of the causal triangle a text), come out exactly as they
+would alone: `clm_sima.hostio.packed_mask` builds that mask. The hidden state CLM pools, a
+text's last token's, is read out of the output at that token's position. A question's state
+and all its options then cost one pass, not one each.
 """
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import onnx
 
-from sima_lmm.model.base import BaseModel, TensorTessellateParameters
+from afe.apis.defines import gen2_target
+from afe.apis.loaded_net import load_model, onnx_source
+from afe.core.configs import QuantizationPrecision
+from afe.ir.tensor_type import ScalarType
+from sima_lmm.model.base import BaseModel, FileGenPrecision, TensorTessellateParameters, _quantization_params
 from sima_lmm.model.onnx_builder import OnnxBuilder, OnnxNode
 
 from clm_sima.config import QwenConfig
 from clm_sima.weights import QwenWeights
-
-# Large enough that exp() underflows to exactly 0, small enough to stay finite in bfloat16
-# once an attention logit is added to it (as for Laya, see laya_sima/hostio.py).
-MASK_NEG = -30000.0
 
 
 @dataclass
@@ -46,6 +52,11 @@ class QwenLayersModel(BaseModel):
     model_path: Path = field(default=None, kw_only=True)
     first_layer: int = field(default=0, kw_only=True)
     num_layers: int = field(default=1, kw_only=True)
+    # How the matrices are stored, where the pass's own precision is not what is wanted: one of
+    # the compiler's per-node weight precisions, by name ("BFLOAT_16_INT4_BLOCKED_WEIGHTS" is
+    # the 4-bit format LLiMa's own models use: a scale a block of input channels). With one
+    # set, compile with --precision BF16; every matrix is then stored that way.
+    weight_precision: str = field(default="", kw_only=True)
 
     def __post_init__(self):
         assert isinstance(self.cfg, QwenConfig)
@@ -80,12 +91,8 @@ class QwenLayersModel(BaseModel):
         cfg, s = self.cfg, self.seq_len
         self.create_onnx_builder()
         self._b.create_input_node("hidden_in", (1, cfg.hidden_size, 1, s))
-        hidden, = self._b.input_nodes
-
-        # (1, key, 1, query): a query sees the keys at or before it.
-        pos = np.arange(s)
-        causal = np.where(pos[:, None] <= pos[None, :], 0.0, MASK_NEG).astype(np.float32)
-        mask = self._b.create_initializer("causal_mask", causal.reshape(1, s, 1, s))
+        self._b.create_input_node("mask", (1, s, 1, s))
+        hidden, mask = self._b.input_nodes
         rope_q = self._rope_tables("rope.q", cfg.num_attention_heads)
         rope_k = self._rope_tables("rope.k", cfg.num_key_value_heads)
 
@@ -174,6 +181,50 @@ class QwenLayersModel(BaseModel):
         direct = self._b.build_op(f"{base_name}.cos", [input_node, cos], "Mul")
         rotated = self._b.build_op(f"{base_name}.sin", [swapped, sin], "Mul")
         return self._b.build_op(f"{base_name}.add", [direct, rotated], "Add")
+
+    # ----------------------------------------------------------- quantization
+
+    def gen_model_sdk_files(self, layer_cfg, log_level: int):
+        """ONNX -> quantized Model SDK file, as `BaseModel` does, or with `weight_precision`
+        set, with every matrix in that precision.
+
+        The compiler takes precision overrides per node, by the node names it assigns itself,
+        so the net is quantized once to learn those names and then again with the overrides
+        (as laya_sima does for its int8 encoder weights).
+        """
+        if not self.weight_precision:
+            return super().gen_model_sdk_files(layer_cfg, log_level)
+        if layer_cfg["precision"] != FileGenPrecision.BF16:
+            raise ValueError("weight_precision selects the weights per node; use it with --precision BF16")
+        precision = QuantizationPrecision[self.weight_precision]
+
+        onnx_model = onnx.load(str(self.onnx_file_name), load_external_data=False)
+        shapes = {
+            node.name: tuple(d.dim_value for d in node.type.tensor_type.shape.dim)
+            for node in onnx_model.graph.input
+        }
+        del onnx_model
+        loaded = load_model(
+            onnx_source(str(self.onnx_file_name), shapes, {n: ScalarType.float32 for n in shapes}),
+            target=gen2_target, log_level=log_level
+        )
+        calibration = [{n: np.zeros((s[0], s[2], s[3], s[1]), np.float32) for n, s in shapes.items()}]
+        params = _quantization_params(FileGenPrecision.BF16)
+
+        def quantize(quant_params):
+            return loaded.quantize(
+                calibration_data=calibration, quantization_config=quant_params,
+                model_name=self.model_name, log_level=log_level, automatic_layout_conversion=True
+            )
+
+        first = quantize(params)
+        chosen = [name for name in first._net.nodes["MLA_0"].ir.nodes if re.fullmatch(r"MLA_0/conv2d_\d+", name)]
+        del first
+        model = quantize(params.with_custom_quantization_configs({
+            name: {"quantization_precision": precision} for name in chosen
+        }))
+        print(f"[quantize] {len(chosen)} matrices stored as {precision.name}", flush=True)
+        model.save(self.model_name, self.sima_model_sdk_path, include_unquantized_net=False)
 
     # ------------------------------------------------------------- MLA layouts
 

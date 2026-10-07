@@ -4,7 +4,9 @@
 Two comparisons, both from the reference's token ids and questions:
 
     hidden    what the compiled encoder embeds each reference text to, against transformers:
-              the cosine between the two (the heads only see the direction)
+              the cosine between the two (the heads only see the direction), once with a pass
+              a text and once with the texts laid end to end in as few passes as they fit,
+              which has to come to the same
     answers   the reference cases asked of `laya serve`, against the reference answers: the
               choice made, and the largest difference in probability
 
@@ -35,13 +37,15 @@ def last_json(text: str):
     return json.loads([line for line in text.splitlines() if line.startswith("{")][-1])
 
 
-def board_hidden(args, id_lists: list[list[int]]) -> tuple[np.ndarray, float]:
+def board_hidden(args, id_lists: list[list[int]], packed: bool = False) -> tuple[np.ndarray, dict]:
     laya, model = f"{args.remote}/laya", f"{args.remote}/{args.model_dir}"
+    lens = f" --seq-lens {args.seq_lens}" if args.seq_lens else ""
     ssh(args.board, f"cat > {args.remote}/clm_check_ids.json", json.dumps({"cases": [{"ids": ids} for ids in id_lists]}))
-    out = last_json(ssh(args.board, f"{laya} hidden {model} --input {args.remote}/clm_check_ids.json --out {args.remote}/clm_check_hidden.f32"))
+    out = last_json(ssh(args.board, f"{laya} hidden {model} --input {args.remote}/clm_check_ids.json "
+                                    f"--out {args.remote}/clm_check_hidden.f32 --packed {int(packed)}{lens}"))
     raw = subprocess.run(["ssh", "-o", "BatchMode=yes", args.board, f"cat {args.remote}/clm_check_hidden.f32"],
                          capture_output=True, check=True).stdout
-    return np.frombuffer(raw, np.float32).reshape(len(id_lists), -1), out["mla_ms_mean"]
+    return np.frombuffer(raw, np.float32).reshape(len(id_lists), -1), out
 
 
 def cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -55,15 +59,16 @@ def main():
     ap.add_argument("--remote", default="/media/nvme/laya")
     ap.add_argument("--model-dir", default="model-clm", help="model directory under --remote")
     ap.add_argument("--graphs", type=int, help="the directory holds only this many of the graphs")
-    ap.add_argument("--layers-per-graph", type=int, default=4)
+    ap.add_argument("--layers-per-graph", type=int, default=2)
+    ap.add_argument("--seq-lens", default="", help="load only these chains on the board, e.g. 128 (default: all)")
     args = ap.parse_args()
 
     if args.graphs:
         cases = json.loads((args.reference / "layer_cases.json").read_text())["cases"]
         layers = np.load(args.reference / "layers.npz")
-        got, mla_ms = board_hidden(args, [case["ids"] for case in cases])
+        got, out = board_hidden(args, [case["ids"] for case in cases])
         depth = args.graphs * args.layers_per_graph
-        print(f"after {depth} layers ({args.graphs} graph{'s' * (args.graphs > 1)}, {mla_ms:.1f} ms a text):")
+        print(f"after {depth} layers ({args.graphs} graph{'s' * (args.graphs > 1)}, {out['mla_ms_mean']:.1f} ms a text):")
         for case, row in zip(cases, got):
             want = layers[str(case["text"])][depth]
             print(f"  {len(case['ids']):3d} tokens  cosine {cosine(row, want):.5f}  "
@@ -72,19 +77,28 @@ def main():
 
     reference = json.loads((args.reference / "cases.json").read_text())
     want = np.load(args.reference / "hidden.npy")
-    got, mla_ms = board_hidden(args, [text["ids"] for text in reference["texts"]])
+    ids = [text["ids"] for text in reference["texts"]]
+    got, out = board_hidden(args, ids)
     cosines = cosine(got, want)
-    print(f"hidden: {len(cosines)} texts, {mla_ms:.1f} ms a text on the MLA; cosine with transformers "
-          f"mean {cosines.mean():.5f}, worst {cosines.min():.5f}")
+    print(f"hidden, a pass a text: {len(cosines)} texts in {out['passes']} passes, {out['mla_ms'] / out['passes']:.1f} ms a pass; "
+          f"cosine with transformers mean {cosines.mean():.5f}, worst {cosines.min():.5f}")
+    together, out = board_hidden(args, ids, packed=True)
+    cosines = cosine(together, want)
+    print(f"hidden, laid end to end: {out['passes']} passes, {out['mla_ms']:.0f} ms in all ({out['mla_ms'] / len(ids):.1f} ms a text); "
+          f"cosine with transformers mean {cosines.mean():.5f}, worst {cosines.min():.5f}; "
+          f"against a pass a text, worst cosine {cosine(together, got).min():.5f}")
 
     requests = "".join(json.dumps({"state": case["state"], "questions": case["questions"]}) + "\n"
                        for case in reference["cases"])
-    out = ssh(args.board, f"{args.remote}/laya serve {args.remote}/{args.model_dir}", requests)
+    lens = f" --seq-lens {args.seq_lens}" if args.seq_lens else ""
+    out = ssh(args.board, f"{args.remote}/laya serve {args.remote}/{args.model_dir}{lens}", requests)
     replies = [json.loads(line) for line in out.splitlines() if line.startswith('{"answers"')]
     same = total = 0
     worst = 0.0
     for case, reply in zip(reference["cases"], replies, strict=True):
-        print(f"{case['name']}  ({reply['usage']['latency_ms']:.0f} ms, {reply['usage']['encoder_passes']} texts embedded)")
+        usage = reply["usage"]
+        print(f"{case['name']}  ({usage['latency_ms']:.0f} ms: {usage['texts_embedded']} texts in {usage['encoder_passes']} passes, "
+              f"{usage['cached']} from memory)")
         for qid, ref in case["answers"].items():
             ans = reply["answers"][qid]
             kind = ref["type"]
