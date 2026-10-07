@@ -49,6 +49,12 @@ MODELS = {
         "card": {"encoder": "mmBERT-base, 322M parameters", "languages": "100+ languages",
                  "upstream": "convaiinnovations/laya", "license": "Apache-2.0"},
         "latency_ms": {"128": 8.1, "256": 15.3, "512": 33.9, "1024": 116.5}, "agreement": "100 / 100"},
+    "chess": {
+        "build": "build/laya-chess/sima_files/devkit", "title": "Laya-chess",
+        "about": "LayaChess (datafreak/laya-chess): Laya fine-tuned on two million Stockfish-rated moves, to rate a chess move's win chance.",
+        "card": {"encoder": "ModernBERT-large, 421M parameters", "languages": "English (chess positions)",
+                 "upstream": "datafreak/laya-chess", "license": "Apache-2.0"},
+        "latency_ms": {"256": 34.8}, "agreement": "same best move in 29 / 30 positions"},
     "dino": {
         "build": "build/laya-dino/sima_files/devkit", "title": "Laya-dino",
         "about": "The English model with its decision head fine-tuned to play the Dino Arena game: run, jump or duck.",
@@ -135,7 +141,7 @@ the weights as int8.
 ## Using them
 
 The files run on a Modalix board with the runtime and web app from
-[sima-laya](https://github.com/dotimothy/sima-laya): its Models page downloads a model from
+[neat-decision-studio](https://github.com/dotimothy/neat-decision-studio): its Models page downloads a model from
 this repository onto the board and loads it on the MLA. By hand:
 
 ```bash

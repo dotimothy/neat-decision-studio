@@ -79,6 +79,11 @@ class LayaConfig(BaseConfig):
         cfg.temperature_by_options = {
             k: float(v) for k, v in agent.get("temperature_by_options", {}).items()
         }
+        if (model_path / "chess_meta.json").is_file():
+            # LayaChess: fine-tuned from the English model, whose calibration temperatures its
+            # config still carries. They were fitted to the base model's answers, and the chess
+            # engine reads its win chances from the plain softmax, so the board does too.
+            cfg.temperature, cfg.temperature_by_options = [1.0, 1.0, 1.0], {}
         if len(agent.get("act_costs", {})) + 1 != 2:
             raise ValueError("only the 2-way act/escalate head is handled")
         # Special tokens come from the tokenizer, not the encoder config: mmBERT's config gives
