@@ -11,7 +11,7 @@ endif()
 find_package(SimaLMM REQUIRED)
 find_package(nlohmann_json QUIET)
 
-add_library(laya_runtime STATIC src/runtime.cpp src/sequence.cpp)
+add_library(laya_runtime STATIC src/runtime.cpp src/sequence.cpp src/clm.cpp)
 target_include_directories(laya_runtime PUBLIC include)
 # sima_lmm/mla_model.hpp pulls in the dispatcher headers, which include <json/json.h>.
 target_include_directories(laya_runtime PRIVATE /usr/include/jsoncpp)

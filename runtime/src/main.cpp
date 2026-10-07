@@ -4,6 +4,10 @@
 //   laya raw   <model_dir> --input FILE                     score pre-tokenized sequences
 //   laya bench <model_dir> [--tokens N] [--iters N]         time the forward pass
 //   laya serve <model_dir>                                  one JSON request per stdin line
+//
+// A model directory with a clm_config.json holds CLM instead (a Qwen3-8B encoder and two
+// projection heads): `run`, `bench` and `serve` work on it as they do on Laya, and `hidden`
+// dumps what the encoder embeds token sequences to.
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -15,6 +19,7 @@
 
 #include <fmt/format.h>
 
+#include "laya/clm.hpp"
 #include "laya/runtime.hpp"
 
 namespace {
@@ -37,6 +42,11 @@ commands:
           (optional "seq_len" pins the graph; "max_len" and "head_max_len" set the token budget)
   hidden  diagnostic: dump the encoder hidden state from an encoder-only ELF
             --elf FILE --seq-len N --input FILE --out FILE
+
+a CLM model directory (one with clm_config.json) takes run, bench and serve as above, and
+  hidden  write the last token's hidden state of token sequences, float32 [case][hidden]
+            --input FILE     {"cases": [{"ids": [...]}, ...]}
+            --out FILE
 
 options:
   --seq-lens LIST    load only these compiled sequence lengths, e.g. 128,512
@@ -213,11 +223,96 @@ int cmd_serve(laya::Runtime& runtime) {
   return 0;
 }
 
+// ------------------------------------------------------------------------------------- CLM
+
+int clm_run(clm::Runtime& runtime, const Args& args) {
+  if (args.has("state") == args.has("state-file"))
+    throw std::invalid_argument("run needs exactly one of --state and --state-file");
+  if (args.has("questions") == args.has("question"))
+    throw std::invalid_argument("run needs exactly one of --questions and --question");
+  const json state = parse_state(args.has("state") ? args.get("state") : read_file(args.get("state-file")));
+  json questions = json::parse(args.has("questions") ? read_file(args.get("questions")) : args.get("question"));
+  if (questions.contains("type") && questions.at("type").is_string())
+    questions = json{{"question", questions}};
+  std::cout << runtime.predict(state, questions).dump(2) << std::endl;
+  return 0;
+}
+
+// Time the encoder: one pass through every graph, for a text of `tokens` tokens.
+int clm_bench(clm::Runtime& runtime, const Args& args) {
+  const auto& cfg = runtime.config();
+  const uint32_t tokens = static_cast<uint32_t>(std::stoul(args.get("tokens", std::to_string(cfg.seq_len))));
+  const int iters = std::stoi(args.get("iters", "10"));
+  if (!tokens || tokens > cfg.seq_len) throw std::invalid_argument("bench: tokens must be within the compiled length");
+  std::vector<uint32_t> ids(tokens, 1000);
+  std::vector<double> mla, pre;
+  for (int i = 0; i < iters + 1; ++i) {
+    double pre_ms = 0, mla_ms = 0;
+    runtime.hidden(ids, &pre_ms, &mla_ms);
+    if (i < 1) continue;
+    mla.push_back(mla_ms);
+    pre.push_back(pre_ms);
+  }
+  auto stats = [](std::vector<double> values) {
+    std::sort(values.begin(), values.end());
+    const double mean = std::accumulate(values.begin(), values.end(), 0.0) / values.size();
+    auto ms = [](double value) { return std::round(value * 1e3) / 1e3; };
+    return json{{"mean", ms(mean)}, {"p50", ms(values[values.size() / 2])}, {"min", ms(values.front())}, {"max", ms(values.back())}};
+  };
+  std::cout << json{{"tokens", tokens}, {"seq_len", cfg.seq_len}, {"graphs", cfg.elfs.size()}, {"iters", iters},
+                    {"precision", cfg.precision}, {"mla_ms", stats(mla)}, {"pre_ms", stats(pre)}}.dump(2)
+            << std::endl;
+  return 0;
+}
+
+int clm_hidden(clm::Runtime& runtime, const Args& args) {
+  const json input = json::parse(read_file(args.get("input")));
+  std::ofstream out(args.get("out"), std::ios::binary);
+  if (!out) throw std::runtime_error("cannot write " + args.get("out"));
+  size_t cases = 0;
+  double mla_ms = 0;
+  for (const auto& item : input.at("cases")) {
+    const auto hidden = runtime.hidden(item.at("ids").get<std::vector<uint32_t>>(), nullptr, &mla_ms);
+    out.write(reinterpret_cast<const char*>(hidden.data()), hidden.size() * sizeof(float));
+    ++cases;
+  }
+  std::cout << json{{"cases", cases}, {"mla_ms_mean", cases ? mla_ms / cases : 0.0}, {"out", args.get("out")}}.dump() << std::endl;
+  return 0;
+}
+
+int clm_serve(clm::Runtime& runtime) {
+  runtime.warm_up();
+  std::cout << json{{"ready", true}, {"seq_lens", {runtime.config().seq_len}}}.dump() << std::endl;
+  for (std::string line; std::getline(std::cin, line);) {
+    if (line.find_first_not_of(" \t\r") == std::string::npos) continue;
+    json response;
+    try {
+      const json request = json::parse(line);
+      response = runtime.predict(request.at("state"), request.at("questions"), request.value("temperature", 1.0));
+      if (request.contains("id")) response["id"] = request.at("id");
+    } catch (const std::exception& error) {
+      response = {{"error", error.what()}};
+    }
+    std::cout << response.dump() << std::endl;
+  }
+  return 0;
+}
+
+int clm_main(const Args& args) {
+  clm::Runtime runtime(args.model_dir);
+  if (args.command == "run") return clm_run(runtime, args);
+  if (args.command == "bench") return clm_bench(runtime, args);
+  if (args.command == "serve") return clm_serve(runtime);
+  if (args.command == "hidden") return clm_hidden(runtime, args);
+  throw std::invalid_argument("a CLM model directory takes run, bench, serve or hidden, not: " + args.command);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
     const Args args = parse_args(argc, argv);
+    if (std::filesystem::exists(std::filesystem::path(args.model_dir) / "clm_config.json")) return clm_main(args);
     laya::Runtime runtime(args.model_dir, parse_list(args.get("seq-lens")));
     if (args.command == "run") return cmd_run(runtime, args);
     if (args.command == "raw") return cmd_raw(runtime, args);
