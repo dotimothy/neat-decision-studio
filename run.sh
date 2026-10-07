@@ -26,8 +26,10 @@
 #   ./run.sh --version           the Neat logo and the versions: firmware, Neat, neat-llima,
 #                                neat-runtime and Neat Decision Studio itself
 #   ./run.sh --reset-mla         reset the board's MLA runtime first (see below)
-#   ./run.sh --reset-token       the token the Models page asks for when the accelerator is
-#                                reset from another machine's browser
+#   ./run.sh --require-reset-token   ask a browser on another machine for a token before it may
+#                                reset the accelerator (or RESET_TOKEN_REQUIRED=1). By default
+#                                anybody who reaches the app may reset it.
+#   ./run.sh --reset-token       that token, when the app runs with --require-reset-token
 #   ./run.sh runtime <args...>   the C++ runtime's own command line instead, e.g.
 #                                ./run.sh runtime bench model --iters 100
 #
@@ -49,6 +51,7 @@ export MLA_SUDO_PASSWORD="${MLA_SUDO_PASSWORD:-edgeai}"   # the DevKit image's s
                                                           # own Reset Accelerator button needs it too
 seq_lens="${LAYA_SEQ_LENS:-all}"
 reset=0
+require_token="${RESET_TOKEN_REQUIRED:-0}"
 games=1
 preload="${LAYA_PRELOAD:-general}"
 hub="${LAYA_HUB:-TDoSiMa/sima-laya}"
@@ -225,7 +228,7 @@ do_update() {
 # Before anything that needs the runtime: an update is also how a broken build gets mended.
 case "${1:-}" in
   update|--update|upgrade) do_update; exit $? ;;
-  -h|--help) sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
 [[ -x "${APP_DIR}/laya" ]] || fail "the runtime is not built yet; run ./setup.sh first"
@@ -242,6 +245,7 @@ while [[ $# -gt 0 ]]; do
     --port) PORT="${2:?--port needs a value}"; shift 2 ;;
     --seq-lens) seq_lens="${2:?--seq-lens needs a value}"; shift 2 ;;
     --reset-mla) reset=1; shift ;;
+    --require-reset-token) require_token=1; shift ;;
     --no-games) games=0; shift ;;
     --preload) preload="${2:?--preload needs a value}"; preload_set=1; shift 2 ;;
     --hub) hub="${2:?--hub needs a value}"; shift 2 ;;
@@ -256,14 +260,14 @@ while [[ $# -gt 0 ]]; do
     --version) banner; system_info; exit 0 ;;
     --reset-token)
       # What the Models page asks for before it resets the accelerator from another machine.
-      cat "${APP_DIR}/.reset-token" 2> /dev/null || echo "no token yet: it is made the first time the app starts"
+      cat "${APP_DIR}/.reset-token" 2> /dev/null || echo "no token: one is made when the app is started with --require-reset-token"
       exit 0 ;;
     --stop)
       # SIGTERM lets the server close the runtimes, which releases the models on the MLA.
       pids="$(pgrep -f 'python3 .*webapp/server[.]py' || true)"
       [[ -n "$pids" ]] && kill -TERM $pids && echo "stopped" || echo "not running"
       exit 0 ;;
-    -h|--help) sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "unknown option: $1 (see --help)" ;;
   esac
 done
@@ -326,6 +330,7 @@ address="$(hostname -I 2> /dev/null | awk '{print $1}')"
 args=(--model "${MODEL_DIR}" --laya "${APP_DIR}/laya" --port "${PORT}" --preload "${preload}" --root "${APP_DIR}"
       --hub "${hub}" --llm "${llm}")
 [[ -n "${seq_lens}" && "${seq_lens}" != "all" ]] && args+=(--seq-lens "${seq_lens}")
+[[ "${require_token}" == "1" ]] && args+=(--require-reset-token)
 # Every other model-<name> directory is a question model the page can switch to.
 for dir in "${APP_DIR}"/model-*/; do
   name="$(basename "$dir")"; name="${name#model-}"

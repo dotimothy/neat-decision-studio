@@ -184,9 +184,9 @@ class Model:
     """One compiled model directory and, while it is loaded, the runtime process holding it.
 
     There are two kinds. A Laya directory has one graph, in one file, for each sequence length
-    it was compiled for, and any of them can be loaded. A CLM directory has one sequence
-    length, whose graph is a chain of files (each a run of the encoder's layers) that are all
-    loaded together.
+    it was compiled for. A CLM directory has, for each sequence length, a chain of files (each
+    a run of the encoder's layers) that are loaded together. Any of a model's lengths can be
+    loaded, each with its own copy of the weights.
     """
 
     def __init__(self, name: str, path: str, laya: str, allowed: str | None):
@@ -194,14 +194,13 @@ class Model:
         self.kind = model_kind(self.path) or "laya"
         self.config = json.loads((self.path / CONFIGS[self.kind]).read_text())
         if self.kind == "clm":
-            self._files = {int(self.config["seq_len"]): list(self.config["elfs"])}
-            sizes = list(self._files)
+            self._files = {int(s): list(files) for s, files in self.config["elfs"].items()}
         else:
             self._files = {int(s): [file] for s, file in self.config["elfs"].items()}
-            sizes = sorted(self._files)
-            if allowed:
-                wanted = {int(s) for s in allowed.split(",")}
-                sizes = [s for s in sizes if s in wanted]
+        sizes = sorted(self._files)
+        if allowed:
+            wanted = {int(s) for s in allowed.split(",")}
+            sizes = [s for s in sizes if s in wanted] or sizes     # a list meant for another model's lengths
         self.seq_lens = sizes                 # graphs this app may load
         self.loaded_seq_lens: list[int] = []
         # What is on the MLA right now, which during a load is not yet everything asked for:
@@ -256,7 +255,7 @@ class Model:
         return {
             "kind": self.kind,
             "checkpoint": self.config.get("model"), "precision": self.config.get("precision"),
-            "max_len": self.config.get("max_len", self.config.get("seq_len")), "hidden_size": self.config.get("hidden_size"),
+            "max_len": self.config.get("max_len", max(self._files)), "hidden_size": self.config.get("hidden_size"),
             "graphs": [{"seq_len": s, "bytes": self.graph_bytes(s), "files": len(self.graph_files(s))} for s in self.seq_lens],
             "seq_lens": self.seq_lens, "fixed_bytes": self.fixed_bytes(),
             "state": self.state, "loaded": self.state == "loaded",
@@ -566,7 +565,9 @@ class ModelManager:
 
     def load(self, name: str, seq_lens: list[int] | None = None):
         model = self.models[name]
-        wanted = sorted(set(seq_lens)) if seq_lens else list(model.seq_lens)
+        # Asked for by name only: all of a Laya's graphs, and CLM's longest chain (each of its
+        # chains is the whole encoder again).
+        wanted = sorted(set(seq_lens)) if seq_lens else list(model.seq_lens[-1:] if model.kind == "clm" else model.seq_lens)
         if not wanted or any(s not in model.seq_lens for s in wanted):
             raise Refused(f"{name} has graphs for {model.seq_lens} tokens, not {wanted}")
         with self._admin:
@@ -605,8 +606,7 @@ class ModelManager:
             others = [model] if model.process is not None else []
             progress = Progress(model.loading_stages(wanted, [other.name for other in others]))
             model.state, model.progress = "loading", progress
-            process = LayaProcess(model._laya, str(model.path),
-                                  ",".join(map(str, wanted)) if model.kind == "laya" else None)
+            process = LayaProcess(model._laya, str(model.path), ",".join(map(str, wanted)))
             first_graph = len(others) + 1           # stages: unloads, reading, graph files, warm-up
             elfs = [file for s in wanted for file in model.graph_files(s)]
 
@@ -799,14 +799,17 @@ class Hub:
         try:
             request = urllib.request.Request(self._url("models.json"), headers={"User-Agent": "neat-decision-studio"})
             with urllib.request.urlopen(request, timeout=15) as response:
-                listed = json.loads(response.read(1 << 20))["models"]
+                document = json.loads(response.read(1 << 20))
+            # "models_v2" holds the kinds of model an app from before them would not know
+            # (CLM); such an app reads "models" alone and goes on working.
+            listed = {**document["models"], **document.get("models_v2", {})}
             models = {}
             for name, entry in listed.items():
                 files = entry["files"]
                 if not (self.NAME.fullmatch(name) and self.NAME.fullmatch(entry["path"])
                         and all(self.FILE.fullmatch(file["name"]) and isinstance(file["bytes"], int)
                                 and re.fullmatch(r"[0-9a-f]{64}", file["sha256"]) for file in files)
-                        and any(file["name"] == "laya_config.json" for file in files)):
+                        and any(file["name"] in CONFIGS.values() for file in files)):
                     raise ValueError(f"the entry for {name!r} is not one this app understands")
                 models[name] = entry
             self._models, self._error = models, None
@@ -849,8 +852,10 @@ class Hub:
                 "path": entry["path"],
                 "card": {key: value for key, value in entry.get("card", {}).items() if isinstance(value, str)},
                 "bytes": total, "have_bytes": 0 if downloading else self._have(name, entry),
-                "graphs": [{"seq_len": int(s), "bytes": sizes.get(elf, 0), "latency_ms": entry.get("latency_ms", {}).get(s)}
-                           for s, elf in sorted(entry.get("graphs", {}).items(), key=lambda item: int(item[0]))],
+                # A graph is one file (Laya) or a chain of them (CLM).
+                "graphs": [{"seq_len": int(s), "bytes": sum(sizes.get(elf, 0) for elf in ([elfs] if isinstance(elfs, str) else elfs)),
+                            "files": 1 if isinstance(elfs, str) else len(elfs), "latency_ms": entry.get("latency_ms", {}).get(s)}
+                           for s, elfs in sorted(entry.get("graphs", {}).items(), key=lambda item: int(item[0]))],
                 "state": "downloading" if downloading else "on_board" if name in self._manager.models else "available",
                 "progress": progress, "error": self._failed.get(name),
             }
@@ -907,8 +912,8 @@ class Hub:
         name, directory = job["name"], self.directory(job["name"])
         try:
             directory.mkdir(exist_ok=True)
-            # laya_config.json goes last: a directory that has it is complete, for run.sh too.
-            for file in sorted(entry["files"], key=lambda file: file["name"] == "laya_config.json"):
+            # The configuration goes last: a directory that has it is complete, for run.sh too.
+            for file in sorted(entry["files"], key=lambda file: file["name"] in CONFIGS.values()):
                 target = directory / file["name"]
                 if target.is_file() and target.stat().st_size == file["bytes"]:
                     job["done"] += file["bytes"]
@@ -1031,10 +1036,12 @@ stopping = threading.Event()             # set when the app is shutting down, to
 
 
 def reset_token(root: Path) -> str:
-    """The word a browser on another machine has to give to reset the accelerator.
+    """The word a browser on another machine has to give to reset the accelerator, where the
+    app was started to ask for one (`--require-reset-token`; by default it is not).
 
-    Resetting unloads other applications' models too, so it is not open to whoever can reach
-    the port: a request from the board itself needs nothing, any other needs this token. It is
+    Resetting unloads other applications' models too, so a board that is shared can keep it
+    from whoever reaches the port: a request from the board itself needs nothing, any other
+    needs this token. It is
     made once and kept in the app directory, readable by the user the app runs as.
     """
     path = root / ".reset-token"
@@ -1178,7 +1185,8 @@ def make_handler(manager: ModelManager, hub: Hub | None, llm: LLM | None = None,
             self._json(200, hub.describe())
 
         def _reset(self):
-            """Reset the accelerator: from the board freely, from elsewhere with the token."""
+            """Reset the accelerator. Anybody who reaches the app may, unless it was started
+            with a token: then freely from the board, and from elsewhere with the token."""
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 request = json.loads(self.rfile.read(length)) if 0 < length <= 4096 else {}
@@ -1186,7 +1194,7 @@ def make_handler(manager: ModelManager, hub: Hub | None, llm: LLM | None = None,
                 request = {}
             local = self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
             given = request.get("token") if isinstance(request, dict) else None
-            if not local and not (token and isinstance(given, str) and secrets.compare_digest(given.strip(), token)):
+            if token and not local and not (isinstance(given, str) and secrets.compare_digest(given.strip(), token)):
                 self._note("reset refused: no token, or not the right one")
                 return self._json(403, {"error": "Resetting the accelerator from another machine needs the reset token.", "needs_token": True})
             self._note("reset the accelerator")
@@ -1448,6 +1456,9 @@ def main():
     ap.add_argument("--llm", default="http://127.0.0.1:9998", metavar="URL",
                     help="an OpenAI-compatible chat server the games can play against, such as NEAT GenAI "
                          "Studio's on this board, or 'none' (default: %(default)s)")
+    ap.add_argument("--require-reset-token", action="store_true",
+                    help="ask a browser on another machine for the reset token before it may reset the "
+                         "accelerator (default: anybody who reaches the app may)")
     ap.add_argument("--studio-control", default="", metavar="URL",
                     help="NEAT GenAI Studio's control port, asked which models it has on the MLA for the "
                          "memory report in Settings, or 'none' (default: port 9997 beside --llm)")
@@ -1499,7 +1510,7 @@ def main():
     if args.studio_control != "none":
         manager.studio_control = args.studio_control or (
             re.sub(r":\d+$", ":9997", args.llm.rstrip("/")) if args.llm != "none" and re.search(r":\d+/?$", args.llm) else "http://127.0.0.1:9997")
-    token = reset_token(root)
+    token = reset_token(root) if args.require_reset_token else None
     server = ThreadingHTTPServer((args.host, args.port), make_handler(manager, hub, llm, token))
     server.daemon_threads = True          # an open event stream must not hold up shutting down
     server.block_on_close = False
@@ -1511,7 +1522,8 @@ def main():
     signal.signal(signal.SIGTERM, on_sigterm)
     print(f"Laya playground on http://{args.host}:{args.port}  models: {', '.join(sources) or 'none'}; "
           f"loaded: {', '.join(preload) or 'none'}; hub: {args.hub}", flush=True)
-    print(f"Resetting the accelerator from another machine's browser needs this token (kept in {root / '.reset-token'}): {token}", flush=True)
+    if token:
+        print(f"Resetting the accelerator from another machine's browser needs this token (kept in {root / '.reset-token'}): {token}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -255,7 +255,9 @@
     for (const graph of local ? local.graphs : remote.graphs) {
       const text = [mb(graph.bytes), graph.files > 1 ? `in ${graph.files} parts` : "", speed[graph.seq_len] ? `${speed[graph.seq_len]} ms` : ""].filter(Boolean).join(" · ");
       if (local) {
-        chosen[name] ??= new Set(local.loaded ? local.loaded_seq_lens : local.seq_lens.slice(0, 1));
+        // To begin with one length is ticked, since each is another copy of the weights: a Laya's
+        // shortest, and CLM's longest, which is the one that takes a whole question in one pass.
+        chosen[name] ??= new Set(local.loaded ? local.loaded_seq_lens : local.kind === "clm" ? local.seq_lens.slice(-1) : local.seq_lens.slice(0, 1));
         const box = el("input", { type: "checkbox", checked: local.loaded ? local.loaded_seq_lens.includes(graph.seq_len) : chosen[name].has(graph.seq_len),
                                   disabled: local.loaded || working });
         box.onchange = () => { box.checked ? chosen[name].add(graph.seq_len) : chosen[name].delete(graph.seq_len); render(); };

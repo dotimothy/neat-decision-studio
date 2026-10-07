@@ -2,9 +2,11 @@
 """Publish compiled models to a Hugging Face repository, for the app's Models page to fetch.
 
 Each model is the directory `laya-compile --devkit` writes (ELFs, embedding table, act tail,
-tokenizer, laya_config.json), uploaded under its name. `models.json` at the top of the
-repository lists what is there, with sizes and SHA-256 sums; the web app reads that list and
-downloads from it (webapp/server.py, `Hub`).
+tokenizer, laya_config.json), or for CLM the one `clm-compile --devkit` writes, uploaded
+under its name. `models.json` at the top of the repository lists what is there, with sizes
+and SHA-256 sums; the web app reads that list and downloads from it (webapp/server.py,
+`Hub`). Laya models are listed under "models"; CLM, which an app from before it would not
+know what to do with, under "models_v2", which such an app does not read.
 
     python3 tools/publish_hub.py --repo TDoSiMa/sima-laya                 # everything built
     python3 tools/publish_hub.py --repo TDoSiMa/sima-laya --only general  # one model
@@ -55,6 +57,15 @@ MODELS = {
         "card": {"encoder": "ModernBERT-large, 421M parameters", "languages": "English (chess positions)",
                  "upstream": "datafreak/laya-chess", "license": "Apache-2.0"},
         "latency_ms": {"256": 34.8}, "agreement": "same best move in 29 / 30 positions"},
+    # CLM is published with its 128-token chain alone: the 32-token one is the whole encoder
+    # again for a pass that is not half as long (README).
+    "clm": {
+        "build": "build/clm/sima_files/devkit", "chains": ["128"], "title": "CLM v0.1 8B",
+        "about": "A Contrastive Language Model: a frozen Qwen3-8B reads the state and each option, and two small heads compare them. "
+                 "The same three kinds of question as Laya on an encoder twenty times the size; a new question takes about 0.3 s.",
+        "card": {"encoder": "Qwen3-8B, 8.2B parameters, as a chain of 18 graphs", "languages": "English",
+                 "upstream": "Contrastive-LM/CLM-v0.1-8B", "license": "Apache-2.0"},
+        "latency_ms": {"128": 254.0}, "agreement": "9 of 13 reference decisions (int8 weights; an approximation)"},
     "dino": {
         "build": "build/laya-dino/sima_files/devkit", "title": "Laya-dino",
         "about": "The English model with its decision head fine-tuned to play the Dino Arena game: run, jump or duck.",
@@ -72,14 +83,43 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+CONFIGS = ("laya_config.json", "clm_config.json")
+
+
+def staged(name: str, spec: dict) -> Path:
+    """The directory to publish: the build's own, or for a model published with only some of
+    its chains (`chains`), a copy of it with those chains' files (hard links) and a
+    configuration that lists them alone."""
+    directory = ROOT / spec["build"]
+    if "chains" not in spec or not (directory / "clm_config.json").is_file():
+        return directory
+    config = json.loads((directory / "clm_config.json").read_text())
+    config["elfs"] = {length: config["elfs"][length] for length in spec["chains"]}
+    stage = ROOT / "build" / f"publish-{name}"
+    if stage.is_dir():
+        for old in stage.iterdir():
+            old.unlink()
+    stage.mkdir(parents=True, exist_ok=True)
+    keep = [file for files in config["elfs"].values() for file in files] + [
+        config["token_embeddings"], config["tokenizer"], config["heads"], str(Path(config["heads"]).with_suffix(".json"))]
+    for file in keep:
+        try:
+            (stage / file).hardlink_to(directory / file)
+        except OSError:
+            import shutil
+            shutil.copy(directory / file, stage / file)
+    (stage / "clm_config.json").write_text(json.dumps(config, indent=4))
+    return stage
+
+
 def entry(name: str, spec: dict) -> dict:
     """The list entry of one model: its files, and its graphs by sequence length."""
-    directory = ROOT / spec["build"]
-    config = json.loads((directory / "laya_config.json").read_text())
+    directory = staged(name, spec)
+    config = json.loads(next(directory / file for file in CONFIGS if (directory / file).is_file()).read_text())
     files = [{"name": path.name, "bytes": path.stat().st_size, "sha256": sha256(path)}
              for path in sorted(directory.iterdir()) if path.is_file()]
     return {"title": spec["title"], "about": spec["about"], "card": spec["card"], "path": name,
-            "checkpoint": config["model"], "precision": config["precision"],
+            "kind": config.get("kind", "laya"), "checkpoint": config["model"], "precision": config["precision"],
             "graphs": config["elfs"], "latency_ms": spec["latency_ms"], "agreement": spec["agreement"],
             "files": files}
 
@@ -95,7 +135,10 @@ def card(repo: str, models: dict) -> str:
         for name, entry in models.items())
     return f"""---
 license: apache-2.0
-base_model: convaiinnovations/laya
+base_model:
+- convaiinnovations/laya
+- Contrastive-LM/CLM-v0.1-8B
+- Qwen/Qwen3-8B
 library_name: sima-lmm
 tags:
 - sima.ai
@@ -106,7 +149,7 @@ tags:
 - modernbert
 ---
 
-# Laya decision models, compiled for the SiMa.ai MLSoC Modalix
+# Decision models (Laya and CLM), compiled for the SiMa.ai MLSoC Modalix
 
 [Laya](https://github.com/NandhaKishorM/laya) by Convai Innovations is a "System-1" decision
 model: an encoder (ModernBERT-large, or mmBERT-base for the multilingual one) with a decision
@@ -120,6 +163,15 @@ multilingual model).
 | folder | model | precision | latency per decision, by tokens | same decision as PyTorch | size |
 |---|---|---|---|---|---|
 {rows}
+
+`clm` is a second kind of decision model, [CLM v0.1 8B](https://huggingface.co/Contrastive-LM/CLM-v0.1-8B)
+by Contrastive-LM: a frozen [Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) embeds the state
+and each option, and two small projection heads compare them. Its encoder is compiled as a
+chain of 18 graphs with int8 weights (7.25 GB on the MLA), and its latency above is one pass
+through them, which holds a question's state and all its options: about 0.3 s for a new
+question, nothing for one seen before. With int8 weights it is an approximation of the
+PyTorch model (embedding cosine about 0.99; 9 of 13 reference decisions the same), and a
+one-token option is embedded poorly.
 
 Latency is one decision on a Modalix DevKit, measured inside the runtime. "Same decision" is
 against the fp32 PyTorch model on 100 decisions with the 128-token graph. Precision `BF16` is
@@ -135,6 +187,16 @@ the weights as int8.
 | `act_tail.f32` | the last layer of the act head, run on the CPU |
 | `tokenizer.json` | the checkpoint's tokenizer |
 | `laya_config.json` | token ids, calibration temperatures, and which graphs there are |
+
+and in `clm`:
+
+| file | what it is |
+|---|---|
+| `qwen_s128_l<NN>n2_stage1_mla.elf` | two layers of the encoder, from layer NN: 18 graphs that run one after another |
+| `token_embeddings.bf16` | Qwen3-8B's embedding table, looked up on the CPU |
+| `heads.f32`, `heads.json` | CLM's state and action heads, run on the CPU, and their layout |
+| `tokenizer.json` | Qwen3-8B's tokenizer |
+| `clm_config.json` | which graphs there are, in order |
 
 `models.json` lists every folder with file sizes and SHA-256 sums.
 
@@ -160,6 +222,12 @@ Apache-2.0. The models are Convai Innovations' Laya checkpoints
 exception is `dino`, whose decision head was fine-tuned on top of the English checkpoint for
 a browser game. Zero-shot quality is the checkpoints': the port reproduces PyTorch's answers,
 including its wrong ones.
+
+`clm` holds the projection heads of Contrastive-LM's CLM-v0.1-8B
+(https://github.com/Contrastive-LM/CLM, Apache-2.0), unchanged, and Alibaba Cloud's Qwen3-8B
+(https://huggingface.co/Qwen/Qwen3-8B, Apache-2.0): its embedding table and tokenizer
+unchanged, and its 36 decoder layers compiled for the MLA with their weights rounded to int8
+and no language-model head.
 """
 
 
@@ -174,23 +242,35 @@ def main():
     api = HfApi()
     api.create_repo(args.repo, repo_type="model", private=args.private, exist_ok=True)
     for name in ([] if args.list_only else args.only or list(MODELS)):
-        directory = ROOT / MODELS[name]["build"]
-        if not (directory / "laya_config.json").is_file():
-            sys.exit(f"{name}: no compiled model in {directory}")
+        if not any((ROOT / MODELS[name]["build"] / file).is_file() for file in CONFIGS):
+            sys.exit(f"{name}: no compiled model in {ROOT / MODELS[name]['build']}")
+        directory = staged(name, MODELS[name])
         print(f"uploading {name} from {directory}", flush=True)
         api.upload_folder(repo_id=args.repo, folder_path=str(directory), path_in_repo=name,
                           commit_message=f"Add {name}")
 
-    # The list holds what is complete in the repository, checked against the local build.
+    # The list is the one in the repository, with the entries of the models uploaded now
+    # written again from their builds. A model that was not uploaded now keeps the entry it
+    # has: its build here may have been made again since, and the sums in the list have to
+    # be those of the files in the repository.
     present = set(api.list_repo_files(args.repo))
     listed = {}
-    for name, spec in MODELS.items():
-        directory = ROOT / spec["build"]
-        names = [path.name for path in directory.iterdir() if path.is_file()] if directory.is_dir() else []
+    if "models.json" in present:
+        from huggingface_hub import hf_hub_download
+        old = json.loads(Path(hf_hub_download(args.repo, "models.json", force_download=True)).read_text())
+        listed = {**old.get("models", {}), **old.get("models_v2", {})}
+        for known in listed.values():
+            known.setdefault("kind", "laya")
+    for name in ([] if args.list_only else args.only or list(MODELS)):
+        directory = staged(name, MODELS[name])
+        names = [path.name for path in directory.iterdir() if path.is_file()]
         if names and all(f"{name}/{file}" in present for file in names):
-            listed[name] = entry(name, spec)
+            listed[name] = entry(name, MODELS[name])
             print(f"listing {name}", flush=True)
-    manifest = json.dumps({"version": 1, "models": listed}, indent=1).encode()
+    listed = {name: listed[name] for name in [*MODELS, *listed] if name in listed}     # in the order above
+    # An app from before CLM reads "models" and would not know a CLM entry: those go apart.
+    manifest = json.dumps({"version": 1, "models": {name: e for name, e in listed.items() if e["kind"] == "laya"},
+                           "models_v2": {name: e for name, e in listed.items() if e["kind"] != "laya"}}, indent=1).encode()
     api.upload_file(repo_id=args.repo, path_or_fileobj=manifest, path_in_repo="models.json",
                     commit_message="Update the model list")
     api.upload_file(repo_id=args.repo, path_or_fileobj=card(args.repo, listed).encode(), path_in_repo="README.md",

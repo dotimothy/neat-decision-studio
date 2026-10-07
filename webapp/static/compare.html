@@ -219,7 +219,7 @@ function card(name, result, index) {
   }
   node.append(list, el("div", { className: "foot", textContent:
     `${usage.mla_ms.toFixed(1)} ms on the MLA · ${result.server_ms.toFixed(0)} ms with waiting · ${usage.tokens} tokens`
-    + (usage.encoder_passes !== undefined ? ` · ${usage.encoder_passes} texts embedded, ${usage.cached} from memory` : "")
+    + (usage.encoder_passes !== undefined ? ` · ${usage.texts_embedded ?? usage.encoder_passes} texts in ${usage.encoder_passes} pass${usage.encoder_passes === 1 ? "" : "es"}, ${usage.cached} from memory` : "")
     + (usage.truncated ? ` · ${usage.state_tokens_dropped} tokens cut` : "") }));
   return [node, shown.said];
 }

@@ -132,8 +132,8 @@ for entry in sorted(os.listdir(root)):
     name = "general" if entry == "model" else entry[len("model-"):]
     if os.path.isfile(os.path.join(path, "clm_config.json")):       # CLM: one graph, in a chain of files
         cfg = json.load(open(os.path.join(path, "clm_config.json")))
-        names = cfg["elfs"] + [cfg["token_embeddings"], cfg["tokenizer"], cfg["heads"]]
-        graphs = f"{cfg['seq_len']} tokens in {len(cfg['elfs'])} parts"
+        names = [n for files in cfg["elfs"].values() for n in files] + [cfg["token_embeddings"], cfg["tokenizer"], cfg["heads"]]
+        graphs = ", ".join(sorted(cfg["elfs"], key=int)) + f" tokens, each in {len(next(iter(cfg['elfs'].values())))} parts"
     elif os.path.isfile(os.path.join(path, "laya_config.json")):
         cfg = json.load(open(os.path.join(path, "laya_config.json")))
         names = list(cfg["elfs"].values()) + [cfg["token_embeddings"], cfg["act_tail"], cfg["tokenizer"]]
@@ -202,9 +202,11 @@ install_alias() {
       ok "Added a 'neat-decision' alias to ${C_DIM}${file}${C_RESET}"
       info "It works in a new shell, or after: ${C_BOLD}source ${file}${C_RESET}"
     fi
-    # The app was Neat Laya Studio before: where its alias is, it goes on working.
+    # The app was Neat Laya Studio before, with an alias of that name: it goes, and the
+    # comment setup wrote above it. `neat-decision` is the one name now.
     if grep -q "^alias neat-laya=" "$file"; then
-      sed -i "s|^alias neat-laya=.*|alias neat-laya='${APP_DIR}/run.sh'|" "$file"
+      sed -i -e '/^# Neat Laya Studio, added by setup\.sh$/d' -e '/^alias neat-laya=/d' "$file"
+      ok "Removed the old 'neat-laya' alias from ${C_DIM}${file}${C_RESET}"
     fi
   done
 }
