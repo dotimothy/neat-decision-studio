@@ -137,3 +137,12 @@ footer.app-footer strong { color: var(--accent-strong); font-weight: 600; }
 footer.app-footer img { height: 20px; width: auto; }
 footer.app-footer .on-dark { display: none; }
 @media (prefers-color-scheme: dark) { footer.app-footer .on-dark { display: inline; } footer.app-footer .on-light { display: none; } }
+
+/* A picture to decide on, for a model that reads them: dropped, pasted or chosen. */
+.picture { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--line);
+           border-radius: 12px; background: var(--panel); }
+.picture.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.picture img { height: 72px; max-width: 128px; object-fit: contain; border-radius: 8px; background: var(--chip); flex: none; }
+.picture .about { flex: 1; min-width: 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.picture .about b { display: block; color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picture[hidden] { display: none; }

@@ -6,6 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
 <title>Neat Decision Studio</title>
 <link rel="stylesheet" href="/static/neat.css">
+<script src="/static/theme.js"></script>
 <style>
   /* The showcase: the story of the demo as a deck of slides, in the format of Neat GenAI
      Studio's showcase (one slide at a time, arrows or keys to move, a slideshow that advances
@@ -40,6 +41,24 @@
   .controls button:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent-strong); }
   .controls button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .controls .icon { width: 34px; padding: 6px 0; }
+  /* The slideshow's timer, which is the live status line of Neat GenAI Studio's terminal put
+     on a button: a spinner whose colour drifts through the Neat palette, the seconds the slide
+     has been up, and a bar in the spectrum with a glint travelling along it. The bar runs the
+     length of a slide's stay and starts again with each slide. */
+  #play { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 7px; }
+  #play svg { width: 11px; height: 11px; fill: currentColor; flex: none; }
+  #play .spin, #play .secs { display: none; }
+  #play.on { background: var(--chip); color: var(--ink); border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); padding-bottom: 8px; padding-top: 4px; }
+  #play.on svg { display: none; }
+  #play.on .spin { display: inline-block; width: 1ch; font: 15px/1 var(--mono); text-align: center; }
+  #play.on .secs { display: inline-block; min-width: 3ch; text-align: right; font: 12px var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+  #play .cd { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; clip-path: inset(0 100% 0 0);
+              background: linear-gradient(90deg, transparent 0 40%, rgba(255, 255, 255, .75) 50%, transparent 60% 100%) 0 0 / 60px 100% no-repeat, var(--spectrum); }
+  #play.on .cd { animation: cd var(--cd, 10s) linear forwards, glint 1.6s linear infinite; }
+  #play.on.held .cd { animation-play-state: paused; }
+  @keyframes cd { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  @keyframes glint { from { background-position: -60px 0, 0 0; } to { background-position: calc(100% + 60px) 0, 0 0; } }
+  @media (prefers-reduced-motion: reduce) { #play.on .cd { animation: cd var(--cd, 10s) linear forwards; } }
   .counter { font: 13px var(--mono); color: var(--muted); min-width: 62px; text-align: center; }
   .counter b { color: var(--ink); }
   .launch { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; font-weight: 600; font-size: 14px; padding: 8px 16px; border-radius: 999px;
@@ -168,10 +187,11 @@
     <button class="icon" id="prev" title="Previous slide (&larr;)" aria-label="Previous slide">&lsaquo;</button>
     <span class="counter"><b id="cnum">01</b> / <span id="ctotal">08</span></span>
     <button class="icon" id="next" title="Next slide (&rarr;)" aria-label="Next slide">&rsaquo;</button>
-    <button id="play" title="Advance by itself (P)">Slideshow</button>
+    <button id="play" title="Advance by itself (P)" aria-pressed="false"><svg viewBox="0 0 12 12" aria-hidden="true"><path id="playIcon" d="M2 1l9 5-9 5z"/></svg><span class="spin" id="playSpin" aria-hidden="true">⠋</span><span id="playLabel">Slideshow</span><span class="secs" id="playSecs" aria-hidden="true">0s</span><span class="cd" aria-hidden="true"></span></button>
     <select id="seconds" aria-label="Seconds per slide" title="Seconds per slide">
       <option value="5">5 s a Slide</option><option value="10" selected>10 s a Slide</option><option value="20">20 s a Slide</option><option value="30">30 s a Slide</option>
     </select>
+    <button class="icon" id="dark" aria-label="Dark mode"></button>
     <a class="launch" href="/"><span class="long">Launch the Studio</span><span class="go"></span></a>
   </div>
 </header>
@@ -356,13 +376,46 @@ function show(index) {
   $("prev").disabled = at === 0; $("next").disabled = at === slides.length - 1;
   document.title = "Neat Decision Studio";                 // one title for every page of the app
   history.replaceState(null, "", "#" + (at + 1));
+  if (timer) wind();                                       // a slide shown by hand gets its full stay too
+}
+// The slideshow: a slide stays for the seconds chosen, and the button shows its stay as Neat
+// GenAI Studio's terminal shows a wait: a spinner going round, its colour drifting through the
+// Neat palette once every five seconds or so, the seconds so far, and the bar filling. Each
+// slide starts the bar and the seconds again.
+const SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", PALETTE = [[22, 200, 166], [75, 181, 74], [169, 200, 28], [58, 134, 236], [242, 128, 29]];
+let since = 0, frame = 0, spin = null;
+function drift(frame) {                                    // round the palette and back to its start, every 60 frames
+  const pos = (frame % 60) / 60 * PALETTE.length, low = Math.floor(pos) % PALETTE.length, high = (low + 1) % PALETTE.length;
+  return "rgb(" + PALETTE[low].map((value, k) => Math.round(value + (PALETTE[high][k] - value) * (pos - Math.floor(pos)))).join(",") + ")";
+}
+function tick() {
+  if ($("play").classList.contains("held")) return;
+  $("playSpin").textContent = SPIN[frame % SPIN.length];
+  $("playSpin").style.color = drift(frame++);
+  $("playSecs").textContent = Math.floor((performance.now() - since) / 1000) + "s";
+}
+function wind() {
+  clearInterval(timer);
+  const stay = Number($("seconds").value) * 1000;
+  timer = setInterval(() => show(at === slides.length - 1 ? 0 : at + 1), stay);
+  since = performance.now(); tick();
+  const line = $("play").querySelector(".cd");
+  $("play").style.setProperty("--cd", stay + "ms");
+  line.style.animation = "none"; void line.offsetWidth; line.style.animation = "";      // start the line again
 }
 function play(on) {
   clearInterval(timer); timer = null;
-  if (on) timer = setInterval(() => show(at === slides.length - 1 ? 0 : at + 1), Number($("seconds").value) * 1000);
+  clearInterval(spin); spin = on ? setInterval(tick, 80) : null;
   $("play").classList.toggle("on", on);
-  $("play").textContent = on ? "Pause" : "Slideshow";
+  $("play").classList.remove("held");
+  $("play").setAttribute("aria-pressed", String(on));
+  $("playLabel").textContent = on ? "Playing" : "Slideshow";
+  $("playIcon").setAttribute("d", on ? "M2 1h3v10H2zM7 1h3v10H7z" : "M2 1l9 5-9 5z");
+  if (on) wind();
 }
+// A tab nobody is looking at does not advance; back in view, the slide starts its stay again.
+document.addEventListener("visibilitychange", () => { if (timer) { if (document.hidden) { clearInterval(timer); $("play").classList.add("held"); }
+                                                                    else { $("play").classList.remove("held"); wind(); } } });
 slides.forEach((slide, i) => {
   const dot = Object.assign(document.createElement("button"), { title: slide.dataset.title, ariaLabel: slide.dataset.title });
   dot.onclick = () => show(i);
@@ -372,6 +425,18 @@ $("ctotal").textContent = String(slides.length).padStart(2, "0");
 $("prev").onclick = () => show(at - 1);
 $("next").onclick = () => show(at + 1);
 $("play").onclick = () => play(!timer);
+// Dark mode, on or off (theme.js): a moon while it is off, a sun while it is on.
+function showTheme() {
+  const dark = window.theme.current() === "dark";
+  $("dark").title = dark ? "Dark Mode Is On: Turn It Off" : "Dark Mode Is Off: Turn It On";
+  $("dark").setAttribute("aria-pressed", String(dark));
+  $("dark").innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px">'
+    + (dark ? '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'
+            : '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>') + "</svg>";
+}
+$("dark").onclick = () => window.theme.toggle();
+addEventListener("themechange", showTheme);
+showTheme();
 $("seconds").onchange = () => { try { localStorage.setItem("laya.showcase.seconds", $("seconds").value); } catch (_) { /* not kept */ } if (timer) play(true); };
 try { const kept = localStorage.getItem("laya.showcase.seconds"); if (["5", "10", "20", "30"].includes(kept)) $("seconds").value = kept; } catch (_) { /* default */ }
 for (const button of document.querySelectorAll("[data-next]")) button.onclick = () => show(at + 1);

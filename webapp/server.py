@@ -20,7 +20,7 @@ in Settings; `--preload` chooses what is loaded at startup. The app also starts 
 on the board at all: Settings then offers the ones published on Hugging Face (`--hub`),
 downloads one into the app directory and lists it.
 
-    python3 webapp/server.py --model /media/nvme/laya/model --laya /media/nvme/laya/laya
+    python3 webapp/server.py --model /media/nvme/neat-decision-studio/model --laya /media/nvme/neat-decision-studio/laya
 """
 import argparse
 import hashlib
@@ -31,6 +31,7 @@ import secrets
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -42,7 +43,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 STATIC = Path(__file__).resolve().parent / "static"
-MAX_BODY = 1 << 20
+MAX_BODY = 16 << 20                   # a question may carry pictures
+MAX_IMAGES = 4
 try:
     VERSION = (Path(__file__).resolve().parents[1] / "VERSION").read_text().strip()
 except OSError:
@@ -172,7 +174,7 @@ SECONDS_TO_WARM_UP = 0.25
 SECONDS_TO_UNLOAD = 0.4
 
 
-CONFIGS = {"laya": "laya_config.json", "clm": "clm_config.json"}
+CONFIGS = {"laya": "laya_config.json", "clm": "clm_config.json", "d1": "d1_config.json"}
 
 
 def model_kind(path: Path) -> str | None:
@@ -183,17 +185,23 @@ def model_kind(path: Path) -> str | None:
 class Model:
     """One compiled model directory and, while it is loaded, the runtime process holding it.
 
-    There are two kinds. A Laya directory has one graph, in one file, for each sequence length
-    it was compiled for. A CLM directory has, for each sequence length, a chain of files (each
-    a run of the encoder's layers) that are loaded together. Any of a model's lengths can be
-    loaded, each with its own copy of the weights.
+    There are three kinds. A Laya directory has one graph, in one file, for each sequence
+    length it was compiled for. A CLM directory has, for each sequence length, a chain of files
+    (each a run of the encoder's layers) that are loaded together. A d1 directory has such
+    chains too, and, if it reads pictures, a vision tower and a projector that are loaded
+    whichever lengths are. Any of a model's lengths can be loaded, each with its own copy of
+    the weights.
     """
 
     def __init__(self, name: str, path: str, laya: str, allowed: str | None):
         self.name, self.path, self._laya = name, Path(path), laya
         self.kind = model_kind(self.path) or "laya"
         self.config = json.loads((self.path / CONFIGS[self.kind]).read_text())
-        if self.kind == "clm":
+        # Graphs loaded with any of the sequence lengths: d1's vision tower and its projector.
+        vision = self.config.get("vision") if self.kind == "d1" else None
+        self.always_files: list[str] = [vision["elf"], vision["projector"]] if vision else []
+        self.sees = bool(vision)              # whether a question to it may carry pictures
+        if self.kind in ("clm", "d1"):
             self._files = {int(s): list(files) for s, files in self.config["elfs"].items()}
         else:
             self._files = {int(s): [file] for s, file in self.config["elfs"].items()}
@@ -226,6 +234,10 @@ class Model:
     def graph_bytes(self, seq_len: int) -> int:
         return sum(self.file_bytes(file) for file in self.graph_files(seq_len))
 
+    def always_bytes(self) -> int:
+        """Bytes of the graphs that are loaded whichever sequence lengths are."""
+        return sum(self.file_bytes(file) for file in self.always_files)
+
     def mla_bytes(self) -> tuple[int, int]:
         """Bytes of this model on the MLA at this moment: (arrived, of the file still arriving).
 
@@ -241,10 +253,15 @@ class Model:
 
     def other_files(self) -> list[str]:
         """What the directory holds besides its configuration and graphs."""
-        keys = ("token_embeddings", "tokenizer", "heads") if self.kind == "clm" else ("token_embeddings", "act_tail", "tokenizer")
-        files = [self.config[key] for key in keys]
+        keys = {"clm": ("token_embeddings", "tokenizer", "heads"), "d1": ("token_embeddings", "type_embeddings", "tokenizer"),
+                "laya": ("token_embeddings", "act_tail", "tokenizer")}[self.kind]
+        files = [self.config[key] for key in keys if self.config.get(key)]      # d1-3B has no type embeddings
         if self.kind == "clm":                    # the heads come with their description
             files.append(str(Path(self.config["heads"]).with_suffix(".json")))
+        if self.kind == "d1":
+            if self.sees:
+                files.append(self.config["vision"]["position_embedding"])
+            files += [name for name in ("LICENSE",) if (self.path / name).is_file()]     # its licence travels with it
         return files
 
     def fixed_bytes(self) -> int:
@@ -253,10 +270,11 @@ class Model:
 
     def describe(self) -> dict:
         return {
-            "kind": self.kind,
+            "kind": self.kind, "images": self.sees,
             "checkpoint": self.config.get("model"), "precision": self.config.get("precision"),
             "max_len": self.config.get("max_len", max(self._files)), "hidden_size": self.config.get("hidden_size"),
             "graphs": [{"seq_len": s, "bytes": self.graph_bytes(s), "files": len(self.graph_files(s))} for s in self.seq_lens],
+            "always_bytes": self.always_bytes(),
             "seq_lens": self.seq_lens, "fixed_bytes": self.fixed_bytes(),
             "state": self.state, "loaded": self.state == "loaded",
             "loaded_seq_lens": self.loaded_seq_lens,
@@ -266,7 +284,7 @@ class Model:
 
     def loading_stages(self, seq_lens: list[int], unloading: list[str]) -> list[tuple[str, float]]:
         """What loading these graphs goes through, in order, with estimates: one stage a file."""
-        if self.kind == "clm":                    # the embedding table is mapped, not read in
+        if self.kind in ("clm", "d1"):            # the embedding table is mapped, not read in
             fixed = seconds_to_read((self.path / self.config["tokenizer"]).stat().st_size, 0) + 0.5
         else:
             fixed = seconds_to_read((self.path / self.config["tokenizer"]).stat().st_size,
@@ -278,6 +296,8 @@ class Model:
                 label = (f"Loading the {s}-token graph" if len(files) == 1
                          else f"Loading the {s}-token graph, part {position + 1} of {len(files)}")
                 graphs.append((label, seconds_to_load_graph(self.file_bytes(file))))
+        for label, file in zip(("Loading the vision tower", "Loading the vision projector"), self.always_files):
+            graphs.append((label, seconds_to_load_graph(self.file_bytes(file))))
         return ([(f"Unloading {other}", SECONDS_TO_UNLOAD) for other in unloading]
                 + [("Reading the tokenizer and embeddings", fixed)] + graphs
                 + [("Warming up", SECONDS_TO_WARM_UP if self.kind == "laya" else 2.0)])
@@ -567,7 +587,9 @@ class ModelManager:
         model = self.models[name]
         # Asked for by name only: all of a Laya's graphs, and CLM's longest chain (each of its
         # chains is the whole encoder again).
-        wanted = sorted(set(seq_lens)) if seq_lens else list(model.seq_lens[-1:] if model.kind == "clm" else model.seq_lens)
+        # A model in chains of several files (CLM, d1-3B) is large: its longest chain alone.
+        chained = model.kind == "clm" or len(model.graph_files(model.seq_lens[-1])) > 1
+        wanted = sorted(set(seq_lens)) if seq_lens else list(model.seq_lens[-1:] if chained else model.seq_lens)
         if not wanted or any(s not in model.seq_lens for s in wanted):
             raise Refused(f"{name} has graphs for {model.seq_lens} tokens, not {wanted}")
         with self._admin:
@@ -575,7 +597,7 @@ class ModelManager:
                 return
             # A load that cannot be satisfied fails halfway and leaves memory held by the MLA
             # server until the MLA services are reset, so refuse what plainly cannot fit.
-            graphs = sum(model.graph_bytes(s) for s in wanted)
+            graphs = sum(model.graph_bytes(s) for s in wanted) + model.always_bytes()
             if self._mla_total and graphs > self._mla_total:
                 raise Refused(
                     f"{name} does not fit: its graphs take {graphs >> 20} MB and the MLA has "
@@ -608,7 +630,7 @@ class ModelManager:
             model.state, model.progress = "loading", progress
             process = LayaProcess(model._laya, str(model.path), ",".join(map(str, wanted)))
             first_graph = len(others) + 1           # stages: unloads, reading, graph files, warm-up
-            elfs = [file for s in wanted for file in model.graph_files(s)]
+            elfs = [file for s in wanted for file in model.graph_files(s)] + model.always_files
 
             def follow(line: str):
                 """The runtime says when it starts and finishes each graph file."""
@@ -722,7 +744,7 @@ class ModelManager:
             if model.state != "unloaded" or model.process is not None:
                 raise Refused(f"{name} is on the MLA; unload it before deleting it")
             names = [CONFIGS[model.kind], *(file for files in model._files.values() for file in files),
-                     *model.other_files()]
+                     *model.always_files, *model.other_files()]
             if any(Path(file).name != file for file in names):
                 raise Refused(f"{name}'s configuration names files outside its directory; not deleting")
             # Out of the list first: a page asking about it meanwhile would look for its files.
@@ -746,9 +768,27 @@ def yes_no(kind: str, text: str) -> tuple[str, dict]:
     (of eight ways of putting it, measured for the Debate page). CLM is asked the way its
     heads were trained: the question itself, with nothing before it.
     """
-    if kind == "clm":
+    if kind in ("clm", "d1"):                 # d1 too: its yes-or-no questions were trained bare
         return "", {"type": "noul", "instructions": text}
     return "Question: " + text, {"type": "choice", "instructions": "Is the answer yes or no?", "criteria": ["yes", "no"]}
+
+
+def pictures(given) -> list:
+    """A request's "images" as the runtime is given them: each a base64 string or data URL of an
+    image file, or raw pixels as {"width", "height", "rgb"}. A path on the board is not taken
+    from a request: that would have the runtime read whatever file it was pointed at."""
+    if given is None or given == []:
+        return []
+    if not isinstance(given, list):
+        given = [given]
+    if len(given) > MAX_IMAGES:
+        raise Refused(f"a question may carry up to {MAX_IMAGES} pictures")
+    for image in given:
+        raw = isinstance(image, dict) and isinstance(image.get("rgb"), str) and all(
+            isinstance(image.get(side), int) and 0 < image[side] <= 16384 for side in ("width", "height"))
+        if not (isinstance(image, str) and image) and not raw:
+            raise Refused("a picture is a base64 string of an image file, or {\"width\", \"height\", \"rgb\"}")
+    return [image if isinstance(image, str) else {key: image[key] for key in ("width", "height", "rgb")} for image in given]
 
 
 def yes_share(answer: dict) -> float | None:
@@ -861,7 +901,7 @@ class Hub:
             }
         return {"repo": self.repo, "page": f"https://huggingface.co/{self.repo}", "error": self._error,
                 "listed": self._models is not None, "models": models,
-                "free_bytes": shutil.disk_usage(self.root).free}
+                "directory": str(self.root), "free_bytes": shutil.disk_usage(self.root).free}
 
     def download(self, name: str):
         entry = self._models_now().get(name)
@@ -1024,15 +1064,80 @@ class LLM:
 PAGES = {"/": "landing.html", "/showcase": "showcase.html", "/debate": "debate.html", "/questions": "index.html", "/games": "snake.html",
          "/games/snake": "snake.html", "/games/chess": "chess.html", "/games/tictactoe": "tictactoe.html",
          "/games/rps": "rps.html", "/games/dino": "games.html", "/games/blackjack": "blackjack.html",
-         "/games/sudoku": "sudoku.html", "/compare": "compare.html",
+         "/games/sudoku": "sudoku.html", "/compare": "compare.html", "/vision": "vision.html",
          "/models": "landing.html"}        # the landing page, on which settings.js opens Settings
 # Scripts, the shared stylesheet, and the brand images and fonts it uses.
-ASSET = re.compile(r"/static/((?:brand/|fonts/|vendor/)?[a-z][a-z0-9-]*\.(js|css|png|svg|woff2))")
-ASSET_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8", "png": "image/png",
+ASSET = re.compile(r"/static/((?:brand/|fonts/|vendor/|samples/)?[a-z][a-z0-9-]*\.(js|css|png|jpg|svg|woff2))")
+ASSET_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8", "png": "image/png", "jpg": "image/jpeg",
                "svg": "image/svg+xml", "woff2": "font/woff2"}
 
 
 stopping = threading.Event()             # set when the app is shutting down, to end the pages' event streams
+
+
+def tls_context(app_dir: Path, cert: str | None, key: str | None) -> ssl.SSLContext | None:
+    """The certificate the app serves HTTPS with: the one given, or one of its own.
+
+    A browser gives a page the camera and the microphone only in a secure context, which over
+    a network means HTTPS; the Vision page's live camera needs that. With no certificate given,
+    the app makes itself one the first time (self-signed, for this board's names and addresses,
+    kept in `.tls/` beside the app), which a browser warns about once and then accepts. None,
+    with a line saying why, when one cannot be made: the app then serves HTTP alone.
+    """
+    if bool(cert) != bool(key):
+        sys.exit("laya webapp: --cert and --key go together")
+    if not cert:
+        store = app_dir / ".tls"
+        cert, key = str(store / "cert.pem"), str(store / "key.pem")
+        if not (Path(cert).is_file() and Path(key).is_file()):
+            name = socket.gethostname() or "modalix"
+            try:
+                addresses = subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=5).stdout.split()
+            except (OSError, subprocess.SubprocessError):
+                addresses = []
+            names = [f"DNS:{n}" for n in dict.fromkeys(["localhost", name, f"{name}.local"])]
+            names += [f"IP:{a}" for a in dict.fromkeys(["127.0.0.1", *addresses]) if re.fullmatch(r"[0-9a-fA-F.:]+", a)]
+            try:
+                store.mkdir(mode=0o700, exist_ok=True)
+                made = subprocess.run(
+                    ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256", "-nodes", "-days", "3650", "-keyout", key, "-out", cert,
+                     "-subj", f"/O=Neat Decision Studio/CN={name}", "-addext", "subjectAltName=" + ",".join(names)],
+                    capture_output=True, text=True, timeout=120)
+                if made.returncode != 0:
+                    raise OSError(made.stderr.strip().splitlines()[-1] if made.stderr.strip() else "openssl failed")
+                os.chmod(key, 0o600)
+                print(f"Made a certificate for HTTPS ({', '.join(n.split(':', 1)[1] for n in names)}): {cert}", flush=True)
+            except (OSError, subprocess.SubprocessError) as error:
+                print(f"No certificate could be made for HTTPS ({error}); serving HTTP alone. "
+                      "The camera on the Vision page then works only in the board's own browser.", flush=True)
+                return None
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    try:
+        context.load_cert_chain(cert, key)
+    except (OSError, ssl.SSLError) as error:
+        sys.exit(f"laya webapp: cannot use the certificate {cert}: {error}")
+    return context
+
+
+class Server(ThreadingHTTPServer):
+    """HTTP and HTTPS on the one port. A TLS connection begins with a handshake record, whose
+    first byte is 22, and nothing in HTTP begins with that byte; so each connection's first
+    byte says which it is, and it is served accordingly. Browsers are sent to HTTPS (see
+    `do_GET`); programs that speak plain HTTP to the API go on as they did."""
+    tls: ssl.SSLContext | None = None
+
+    def process_request_thread(self, request, client_address):
+        if self.tls is not None:
+            try:
+                request.settimeout(20)        # a connection that says nothing is not waited on for long
+                secure = request.recv(1, socket.MSG_PEEK) == b"\x16"
+                if secure:
+                    request = self.tls.wrap_socket(request, server_side=True)
+                request.settimeout(None)
+            except (OSError, ssl.SSLError):   # nothing came, or a browser that does not trust the certificate yet hung up
+                self.shutdown_request(request)
+                return
+        super().process_request_thread(request, client_address)
 
 
 def reset_token(root: Path) -> str:
@@ -1092,6 +1197,17 @@ def make_handler(manager: ModelManager, hub: Hub | None, llm: LLM | None = None,
 
         def do_GET(self):
             path = self.path.split("?", 1)[0]
+            # A page asked for over plain HTTP from another machine is sent to HTTPS, where the
+            # browser will let it use a camera. The board's own browser stays as it is (a page
+            # from localhost is trusted with one already), and so does everything that is not a
+            # page: programs speak plain HTTP to the API as before.
+            if (path in PAGES and self.server.tls is not None and not isinstance(self.connection, ssl.SSLSocket)
+                    and self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1") and self.headers.get("Host")):
+                self.send_response(307)
+                self.send_header("Location", f"https://{self.headers['Host']}{self.path}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if path in PAGES:
                 self._send(200, (STATIC / PAGES[path]).read_bytes(), "text/html; charset=utf-8")
             elif path == "/api/info":
@@ -1108,7 +1224,7 @@ def make_handler(manager: ModelManager, hub: Hub | None, llm: LLM | None = None,
             elif (asset := ASSET.fullmatch(path)) and (STATIC / asset[1]).is_file():
                 # Images and fonts do not change between deploys; code does.
                 self._send(200, (STATIC / asset[1]).read_bytes(), ASSET_TYPES[asset[2]],
-                           cache="max-age=86400" if asset[2] in ("png", "svg", "woff2") else "no-store")
+                           cache="max-age=86400" if asset[2] in ("png", "jpg", "svg", "woff2") else "no-store")
             else:
                 self._json(404, {"error": "not found"})
 
@@ -1210,7 +1326,8 @@ def make_handler(manager: ModelManager, hub: Hub | None, llm: LLM | None = None,
 
             Either {"yes_no": "a question"}, which each model is asked in the form that suits
             its kind and answered with "yes", the probability of yes; or {"state", "questions"}
-            as for /api/predict, sent to each as it is. "models" names which.
+            as for /api/predict, sent to each as it is. "models" names which. With "images",
+            the models that read pictures are asked and the others say that they do not.
             """
             request = self._body(known=False)
             if request is None:
@@ -1220,18 +1337,29 @@ def make_handler(manager: ModelManager, hub: Hub | None, llm: LLM | None = None,
                 return self._json(404, {"error": "models must be a list of models on this board"})
             if not names:
                 return self._json(409, {"error": "no model is loaded", "not_loaded": True})
+            try:
+                images = pictures(request.get("images"))
+            except Refused as error:
+                return self._json(400, {"error": str(error)})
+            blind = [name for name in names if images and not manager.models[name].sees]
+            asked = [name for name in names if name not in blind]
             text = request.get("yes_no")
             if isinstance(text, str) and text.strip():
                 payloads = {}
-                for name in names:
+                for name in asked:
                     state, question = yes_no(manager.models[name].kind, text.strip())
                     payloads[name] = {"state": state, "questions": {"answer": question}}
             elif "state" in request and "questions" in request:
-                payloads = {name: {"state": request["state"], "questions": request["questions"]} for name in names}
+                payloads = {name: {"state": request["state"], "questions": request["questions"]} for name in asked}
             else:
                 return self._json(400, {"error": "expected {\"yes_no\": ...} or {\"state\": ..., \"questions\": {...}}"})
+            for payload in payloads.values():
+                if images:
+                    payload["images"] = images
             start = time.perf_counter()
-            results = manager.ask_all(names, payloads)
+            results = manager.ask_all(asked, payloads) if asked else {}
+            for name in blind:
+                results[name] = {"error": f"{name} reads text only"}
             if isinstance(text, str) and text.strip():
                 for result in results.values():
                     if "answers" in result:
@@ -1318,6 +1446,11 @@ def make_handler(manager: ModelManager, hub: Hub | None, llm: LLM | None = None,
                 if "state" not in request or "questions" not in request:
                     return self._json(400, {"error": "expected {\"state\": ..., \"questions\": {...}}"})
                 forward = {"state": request["state"], "questions": request["questions"]}
+                images = pictures(request.get("images"))
+                if images:
+                    if name in manager.models and not manager.models[name].sees:
+                        return self._json(409, {"error": f"{name} reads text only. Ask a model that reads pictures (d1) about a picture."})
+                    forward["images"] = images
                 # seq_len pins one compiled graph; max_len and head_max_len set the token budget.
                 for key in ("seq_len", "max_len", "head_max_len"):
                     if isinstance(request.get(key), int) and request[key] > 0:
@@ -1364,17 +1497,40 @@ def load_shown(manager: ModelManager, name: str):
         r, g, b = (round(palette[low][k] + (palette[low + 1][k] - palette[low][k]) * mix) for k in range(3))
         return f"\033[38;2;{r};{g};{b}m"
 
-    while thread.is_alive():
-        progress = manager.models[name].progress
-        shown = progress.describe() if progress else {"fraction": 0.0, "stage": "Starting", "step": 1, "steps": 1}
-        filled = round(shown["fraction"] * width)
-        bar = "".join(colour(k / (width - 1)) + "█" for k in range(filled)) + "\033[38;2;60;66;74m" + "░" * (width - filled) + "\033[0m"
-        sys.stdout.write(f"\r\033[K   \033[38;2;47;212;192m{spinner[tick % len(spinner)]}\033[0m {bar} {round(shown['fraction'] * 100):3d}%  "
-                         f"\033[38;2;140;150;160m{shown['stage']}\033[0m")
+    def lit(position: float, glint: float) -> str:    # a cell of the bar, brightened where the glint passes
+        at = position * (len(palette) - 1)
+        low, mix = min(int(at), len(palette) - 2), at - min(int(at), len(palette) - 2)
+        shine = 0.45 * max(0.0, 1.0 - abs(position * (width - 1) - glint) / 2.5)
+        r, g, b = (round((palette[low][k] + (palette[low + 1][k] - palette[low][k]) * mix) * (1 - shine) + 255 * shine) for k in range(3))
+        return f"\033[38;2;{r};{g};{b}m"
+
+    def drift(tick: int) -> str:                      # round the palette and back to its start, every 60 frames
+        at = (tick % 60) / 60 * len(palette)
+        low, mix = int(at) % len(palette), at - int(at)
+        r, g, b = (round(palette[low][k] + (palette[(low + 1) % len(palette)][k] - palette[low][k]) * mix) for k in range(3))
+        return f"\033[38;2;{r};{g};{b}m"
+
+    # The live line of NEAT GenAI Studio's terminal: the spinner's colour drifts through the
+    # palette, a glint travels along the bar, and the time waited so far is at the end.
+    sys.stdout.write("\033[?25l")
+    try:
+        while thread.is_alive():
+            progress = manager.models[name].progress
+            shown = progress.describe() if progress else {"fraction": 0.0, "stage": "Starting", "step": 1, "steps": 1}
+            filled = round(shown["fraction"] * width)
+            glint = (tick * 0.7) % (width + 8) - 4
+            bar = ("".join(lit(k / (width - 1), glint) + "█" for k in range(filled))
+                   + "\033[38;2;60;66;74m" + "░" * (width - filled) + "\033[0m")
+            waited = time.monotonic() - started
+            timer = f"{waited:.0f}s" if waited < 60 else f"{int(waited // 60)}m{int(waited % 60):02d}s"
+            sys.stdout.write(f"\r\033[K   {drift(tick)}{spinner[tick % len(spinner)]}\033[0m {bar} "
+                             f"{round(shown['fraction'] * 100):3d}%  \033[38;2;140;150;160m{shown['stage']}\033[0m  \033[2m{timer}\033[0m")
+            sys.stdout.flush()
+            tick += 1
+            thread.join(0.08)
+    finally:
+        sys.stdout.write("\r\033[K\033[?25h")
         sys.stdout.flush()
-        tick += 1
-        thread.join(0.08)
-    sys.stdout.write("\r\033[K")
     if failure:
         raise failure[0]
     graphs = ", ".join(map(str, manager.models[name].loaded_seq_lens))
@@ -1439,8 +1595,9 @@ def hub_command(hub: Hub | None, manager: ModelManager, args) -> int:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--model", default="/media/nvme/laya/model", help="compiled model directory")
-    ap.add_argument("--laya", default="/media/nvme/laya/laya", help="the laya runtime binary")
+    app_dir = Path(__file__).resolve().parents[1]          # the app directory, whatever it is called
+    ap.add_argument("--model", default=str(app_dir / "model"), help="compiled model directory")
+    ap.add_argument("--laya", default=str(app_dir / "laya"), help="the laya runtime binary")
     ap.add_argument("--seq-lens", help="offer only these compiled sequence lengths, e.g. 128,512")
     ap.add_argument("--game-model", help="compiled model directory for the games page")
     ap.add_argument("--extra-model", action="append", default=[], metavar="NAME=DIR",
@@ -1451,8 +1608,9 @@ def main():
     ap.add_argument("--hub", default="TDoSiMa/sima-laya", metavar="REPO",
                     help="Hugging Face repository the Models page offers downloads from, or 'none' "
                          "(default: %(default)s)")
-    ap.add_argument("--root", help="where downloaded models go: `model` and `model-<name>` in this "
-                                   "directory (default: the directory holding --model)")
+    ap.add_argument("--root", "--models-dir", dest="root", metavar="DIR",
+                    help="where downloaded models go: `model` and `model-<name>` in this directory "
+                         "(default: the directory holding --model). run.sh passes LAYA_MODELS_DIR")
     ap.add_argument("--llm", default="http://127.0.0.1:9998", metavar="URL",
                     help="an OpenAI-compatible chat server the games can play against, such as NEAT GenAI "
                          "Studio's on this board, or 'none' (default: %(default)s)")
@@ -1466,6 +1624,12 @@ def main():
                     help="print the models on Hugging Face (name, title, size, state; tab-separated) and exit")
     ap.add_argument("--fetch", nargs="+", metavar="NAME",
                     help="download these models from Hugging Face (or 'all') and exit, without serving")
+    ap.add_argument("--https", choices=["auto", "on", "off"], default="auto",
+                    help="serve HTTPS as well as HTTP, on the same port, and send browsers to it: a page gets the "
+                         "camera only over HTTPS. auto (the default): if a certificate is given or can be made; "
+                         "on: or do not start; off: HTTP alone")
+    ap.add_argument("--cert", help="a certificate to serve HTTPS with, PEM (default: a self-signed one, made on first use)")
+    ap.add_argument("--key", help="the certificate's private key, PEM")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8095)
     args = ap.parse_args()
@@ -1510,8 +1674,14 @@ def main():
     if args.studio_control != "none":
         manager.studio_control = args.studio_control or (
             re.sub(r":\d+$", ":9997", args.llm.rstrip("/")) if args.llm != "none" and re.search(r":\d+/?$", args.llm) else "http://127.0.0.1:9997")
-    token = reset_token(root) if args.require_reset_token else None
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(manager, hub, llm, token))
+    # The token belongs to the app and not to the models, which may be kept somewhere else.
+    token = reset_token(app_dir) if args.require_reset_token else None
+    server = Server((args.host, args.port), make_handler(manager, hub, llm, token))
+    if args.https != "off":
+        server.tls = tls_context(app_dir, args.cert, args.key)
+        if server.tls is None and args.https == "on":
+            manager.stop()
+            sys.exit("laya webapp: --https on, and there is no certificate to serve it with")
     server.daemon_threads = True          # an open event stream must not hold up shutting down
     server.block_on_close = False
 
@@ -1520,10 +1690,10 @@ def main():
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, on_sigterm)
-    print(f"Laya playground on http://{args.host}:{args.port}  models: {', '.join(sources) or 'none'}; "
+    print(f"Laya playground on {'https' if server.tls else 'http'}://{args.host}:{args.port}{' (and http, for programs)' if server.tls else ''}  models: {', '.join(sources) or 'none'}; "
           f"loaded: {', '.join(preload) or 'none'}; hub: {args.hub}", flush=True)
     if token:
-        print(f"Resetting the accelerator from another machine's browser needs this token (kept in {root / '.reset-token'}): {token}", flush=True)
+        print(f"Resetting the accelerator from another machine's browser needs this token (kept in {app_dir / '.reset-token'}): {token}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

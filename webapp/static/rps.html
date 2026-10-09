@@ -108,6 +108,7 @@
   .streak i.win { background: var(--good); } .streak i.loss { background: var(--bad); }
 </style>
 <link rel="stylesheet" href="/static/neat.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <header>
@@ -365,6 +366,8 @@ $("seat").onchange = () => {
 };
 
 const llm = createLLMPlayer(document.querySelectorAll("main > section")[1]);
+llm.reads = "The reply is searched for the words rock, paper and scissors, and the first one found is the throw. It is told both sides' "
+  + "last throws, as Laya is told its opponent's.";
 const picker = createModelPicker({ mount: $("picker"), onReady: (ready) => { draw(); if (ready) loop(); } });
 picker.seats($("seat"));
 reset();

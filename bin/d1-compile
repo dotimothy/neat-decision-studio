@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Runs `python -m d1_sima.cli` under the SiMa Model Compiler venv.
+# Must be invoked where that venv works (the NEAT SDK container); see README.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+: "${MODEL_COMPILER_BIN:=/sdk-extensions/model-compiler/bin}"
+if [[ ! -x "$MODEL_COMPILER_BIN/python" ]]; then
+  echo "d1-compile: no python in MODEL_COMPILER_BIN=$MODEL_COMPILER_BIN" >&2
+  exit 3
+fi
+# shellcheck disable=SC1091
+source "$MODEL_COMPILER_BIN/activate"
+PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}" exec python -m d1_sima.cli "$@"

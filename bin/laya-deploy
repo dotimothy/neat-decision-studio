@@ -3,25 +3,33 @@
 # there. Models go on the NVMe: the root filesystem is too small for them.
 #
 #   bin/laya-deploy [build/laya] [--game build/laya-dino] [--extra NAME=BUILD_DIR ...]
-#                   [--board user@host] [--remote DIR]
+#                   [--board user@host] [--remote DIR] [--models-dir DIR]
 #
-# Without a build directory only the runtime and the web app are copied; the app's Models
-# page then downloads compiled models from Hugging Face.
+# Without a build directory only the runtime and the web app are copied; the app's Settings
+# then download compiled models from Hugging Face.
+# The app goes to /media/nvme/neat-decision-studio, unless --remote (or LAYA_REMOTE_DIR) says
+# otherwise, or the board still has it under its old name, /media/nvme/laya: then that one is
+# kept, so the models in it are not copied or downloaded a second time.
+# --models-dir (or LAYA_MODELS_DIR) is a directory on the board to keep the models in, apart
+# from the app; the board remembers it. Without it, the one the board remembers is used, and
+# failing that the app's own directory.
 # --game deploys a game-specialized model next to the general one (as model-dino).
 # --extra deploys another question model the page can switch to (as model-NAME).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-usage() { sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 build="" game=""
 extras=()
 board="${LAYA_BOARD:-sima@192.168.91.225}"
-remote="${LAYA_REMOTE_DIR:-/media/nvme/laya}"
+remote="${LAYA_REMOTE_DIR:-}"
+models="${LAYA_MODELS_DIR:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --game) game="${2:?--game needs a build directory}"; shift 2 ;;
     --extra) extras+=("${2:?--extra needs NAME=BUILD_DIR}"); shift 2 ;;
     --board) board="${2:?--board needs user@host}"; shift 2 ;;
     --remote) remote="${2:?--remote needs a directory}"; shift 2 ;;
+    --models-dir) models="${2:?--models-dir needs a directory on the board}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "laya-deploy: unknown option: $1" >&2; usage >&2; exit 2 ;;
     *) [[ -z "$build" ]] || { echo "laya-deploy: more than one build directory" >&2; exit 2; }
@@ -29,21 +37,41 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 for dir in ${build:+"$build"} ${game:+"$game"} "${extras[@]#*=}"; do
-  if [[ ! -f "$dir/sima_files/devkit/laya_config.json" && ! -f "$dir/sima_files/devkit/clm_config.json" ]]; then
-    echo "laya-deploy: no laya_config.json or clm_config.json in $dir/sima_files/devkit; run laya-compile or clm-compile first" >&2
+  if [[ ! -f "$dir/sima_files/devkit/laya_config.json" && ! -f "$dir/sima_files/devkit/clm_config.json"
+        && ! -f "$dir/sima_files/devkit/d1_config.json" ]]; then
+    echo "laya-deploy: no laya_config.json, clm_config.json or d1_config.json in $dir/sima_files/devkit; run laya-compile, clm-compile or d1-compile first" >&2
     exit 2
   fi
 done
 
+if [[ -z "$remote" ]]; then
+  remote=/media/nvme/neat-decision-studio
+  if ssh -o BatchMode=yes "$board" "[ ! -e '$remote' ] && [ -f /media/nvme/laya/run.sh ]"; then
+    remote=/media/nvme/laya
+    echo "laya-deploy: this board has the app in $remote (its folder before the rename); keeping it there."
+    echo "             To rename it: stop the app, mv $remote /media/nvme/neat-decision-studio, run ./setup.sh in it."
+  fi
+fi
 ssh -o BatchMode=yes "$board" "mkdir -p '$remote/runtime' '$remote/webapp'"
+# Where the board keeps its models: what was asked for here, else what it remembers, else the
+# app's directory. setup.sh, run below, is told of one asked for and remembers it.
+setup_args=()
+if [[ -n "$models" ]]; then
+  setup_args=(--models-dir "$models")
+  [[ "$models" == "default" ]] && models="$remote"
+else
+  models="$(ssh -o BatchMode=yes "$board" "cat '$remote/.models-dir' 2> /dev/null" || true)"
+  models="${models:-$remote}"
+fi
+[[ "$models" == "$remote" ]] || { ssh -o BatchMode=yes "$board" "mkdir -p '$models'"; echo "models: $board:$models"; }
 if [[ -n "$build" ]]; then
-  rsync -az --delete --info=stats1 "$build/sima_files/devkit/" "$board:$remote/model/"
+  rsync -az --delete --info=stats1 "$build/sima_files/devkit/" "$board:$models/model/"
 fi
 if [[ -n "$game" ]]; then
-  rsync -az --delete --info=stats1 "$game/sima_files/devkit/" "$board:$remote/model-dino/"
+  rsync -az --delete --info=stats1 "$game/sima_files/devkit/" "$board:$models/model-dino/"
 fi
 for extra in "${extras[@]}"; do
-  rsync -az --delete --info=stats1 "${extra#*=}/sima_files/devkit/" "$board:$remote/model-${extra%%=*}/"
+  rsync -az --delete --info=stats1 "${extra#*=}/sima_files/devkit/" "$board:$models/model-${extra%%=*}/"
 done
 rsync -az --delete --exclude build "$root/runtime/" "$board:$remote/runtime/"
 rsync -az --delete --exclude __pycache__ "$root/webapp/" "$board:$remote/webapp/"
@@ -55,6 +83,6 @@ if git -C "$root" rev-parse --short=12 HEAD > /dev/null 2>&1; then
   git -C "$root" diff --quiet HEAD 2> /dev/null || version+=".modified"
 fi
 ssh -o BatchMode=yes "$board" "printf '%s\n' '$version' > '$remote/VERSION'"
-ssh -o BatchMode=yes "$board" "sync; '$remote/setup.sh'"
+ssh -o BatchMode=yes "$board" "sync; '$remote/setup.sh' ${setup_args[*]@Q}"
 echo "deployed: $board:$remote"
 echo "  start the web app:  ssh $board $remote/run.sh"

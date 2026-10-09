@@ -15,9 +15,12 @@ typed. With a state set (`/state ...`), a line is a yes-or-no question about tha
 `/choice` and `/score` ask the other two kinds.
 """
 import argparse
+import atexit
+import base64
 import codecs
 import json
 import os
+import re
 import select
 import shutil
 import sys
@@ -123,10 +126,175 @@ def bar(fraction: float, width: int = 28, colour: str = ACCENT) -> str:
     return f"{colour}{'█' * filled}{RESET}{DIM}{'░' * (width - filled)}{RESET}"
 
 
-def progress_line(fraction: float, text: str):
-    columns = os.get_terminal_size().columns if sys.stdout.isatty() else 100
-    line = f"  {bar(fraction, 24)} {round(fraction * 100):3d}%  {MUTED}{text}{RESET}"
-    sys.stdout.write("\r\033[K" + line[: columns + 60])
+# ---- The live status line: a spinner, a progress bar, a running timer ----
+# Anything the prompt waits on (the app coming up, a model loading, a download, a reset, an
+# answer) is drawn as one line that keeps moving, so a wait never looks like a hang. It is the
+# status line of NEAT GenAI Studio's terminal chat (its src/python/cli/main.py, Apache-2.0),
+# brought over: the spinner's colour drifts through the Neat palette, a bar's filled cells run
+# teal to lime with a glint travelling along them, and the time waited so far is at the end.
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+SPIN_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+BAR_EIGHTHS = " ▏▎▍▌▋▊▉█"
+PALETTE = ((61, 179, 138), (74, 168, 54), (154, 190, 30), (58, 125, 216), (223, 108, 30))     # the Neat sparkle's colours
+BAR_STOPS = (PALETTE[0], PALETTE[2])
+_cursor_hidden = False
+
+
+def fg(rgb) -> str:
+    if not RESET:                                            # no colour: not a terminal, or NO_COLOR
+        return ""
+    r, g, b = (max(0, min(255, int(v))) for v in rgb)
+    return f"\033[38;2;{r};{g};{b}m"
+
+
+def mix(a, b, t):
+    return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
+
+
+def gradient(stops, t):
+    """The colour at position t (0..1) along a list of RGB stops."""
+    t = max(0.0, min(1.0, t)) * (len(stops) - 1)
+    i = min(int(t), len(stops) - 2)
+    return mix(stops[i], stops[i + 1], t - i)
+
+
+def fit(line: str, width: int) -> str:
+    """Cut a line to `width` visible columns, keeping its colour codes whole: a status line that
+    wraps cannot be redrawn in place."""
+    if width <= 0 or len(ANSI.sub("", line)) <= width:
+        return line
+    out, shown, pos = [], 0, 0
+    for match in ANSI.finditer(line):
+        take = line[pos:match.start()][:max(0, width - 1 - shown)]
+        out += [take, match.group()]
+        shown += len(take)
+        pos = match.end()
+    out.append(line[pos:][:max(0, width - 1 - shown)])
+    return "".join(out) + "…" + RESET
+
+
+def fmt_secs(seconds: float) -> str:
+    return f"{seconds:.0f}s" if seconds < 60 else f"{int(seconds // 60)}m{int(seconds % 60):02d}s"
+
+
+def spinner_frame(frame: int) -> str:
+    """One frame of the spinner; its colour drifts through the palette."""
+    return f"{fg(gradient(PALETTE + PALETTE[:1], (frame % 60) / 60))}{SPIN_FRAMES[frame % len(SPIN_FRAMES)]}{RESET}"
+
+
+def progress_bar(fraction: float | None, frame: int = 0, width: int = 24) -> str:
+    """A bar for `fraction` (0..1), or a sweeping one when it is None. The leading edge moves in
+    eighths of a cell, so slow progress still shows."""
+    cells = []
+    if fraction is None:
+        span = max(3, width // 5)
+        period = 2 * (width - span)
+        at = frame % max(1, period)
+        at = at if at <= period // 2 else period - at
+        for i in range(width):
+            cells.append(f"{fg(gradient(BAR_STOPS, i / max(1, width - 1)))}█" if at <= i < at + span else f"{MUTED}░")
+        return "".join(cells) + RESET
+    fill = max(0.0, min(1.0, float(fraction))) * width
+    full, eighth = int(fill), int((fill - int(fill)) * 8)
+    glint = (frame * 0.7) % (width + 8) - 4
+    for i in range(width):
+        if i < full or (i == full and eighth):
+            colour = mix(gradient(BAR_STOPS, i / max(1, width - 1)), (255, 255, 255), 0.45 * max(0.0, 1.0 - abs(i - glint) / 2.5))
+            cells.append(f"{fg(colour)}{'█' if i < full else BAR_EIGHTHS[eighth]}")
+        else:
+            cells.append(f"{MUTED}░")
+    return "".join(cells) + RESET
+
+
+def _show_cursor():
+    global _cursor_hidden
+    if _cursor_hidden:
+        sys.stdout.write("\033[?25h")
+        sys.stdout.flush()
+        _cursor_hidden = False
+
+
+class LiveLine:
+    """One status line, redrawn about twelve times a second on its own thread.
+
+    `render(frame, elapsed_seconds)` returns the line to show. Use it as a context manager
+    around the wait; nothing else may print while it is active. Silent when stdout is not a
+    terminal, so logs never collect escape codes.
+    """
+
+    def __init__(self, render, interval: float = 0.08, delay: float = 0.0):
+        self._render, self._interval, self._delay = render, interval, delay    # delay: a wait shorter than this draws nothing
+        self._stop = threading.Event()
+        self._thread = None
+        self.active = sys.stdout.isatty() and os.environ.get("TERM") != "dumb"
+
+    def __enter__(self):
+        global _cursor_hidden
+        if not self.active:
+            return self
+        if not _cursor_hidden:
+            atexit.register(_show_cursor)                    # never leave the cursor hidden
+            sys.stdout.write("\033[?25l")
+            _cursor_hidden = True
+        self._started = time.monotonic()
+        self._thread = threading.Thread(target=self._run, name="live-line", daemon=True)
+        self._thread.start()
+        return self
+
+    def _run(self):
+        frame = 0
+        if self._delay and self._stop.wait(self._delay):
+            return
+        while not self._stop.is_set():
+            try:
+                line = self._render(frame, time.monotonic() - self._started)
+            except Exception:                                # a drawing bug must not break the wait
+                line = ""
+            if line:
+                sys.stdout.write("\r\033[K" + fit(line, shutil.get_terminal_size((80, 24)).columns - 1))
+                sys.stdout.flush()
+            frame += 1
+            self._stop.wait(self._interval)
+
+    def __exit__(self, *exc):
+        if self._thread is not None:
+            self._stop.set()
+            self._thread.join()
+            self._thread = None
+            sys.stdout.write("\r\033[K")
+            _show_cursor()
+            sys.stdout.flush()
+        return False
+
+
+def clip(text: str, room: int) -> str:
+    """`text` in at most `room` columns. The words of a status line give way to its timer."""
+    return text if len(text) <= room else text[:max(0, room - 1)] + "…"
+
+
+def spinner(label) -> LiveLine:
+    """A spinner with a label and a running timer: `⠹ loading…  12s`. `label` may be a function
+    returning the current text."""
+    def render(frame, elapsed):
+        timer = fmt_secs(elapsed)
+        room = shutil.get_terminal_size((80, 24)).columns - 7 - len(timer)
+        return f"  {spinner_frame(frame)} {MUTED}{clip(label() if callable(label) else label, room)}{RESET}  {DIM}{timer}{RESET}"
+    return LiveLine(render, delay=0.15)                      # a decision in 40 ms should not flash a spinner
+
+
+def progress(state) -> LiveLine:
+    """A spinner, a bar and a running timer for something that reports how far it is: `state()`
+    returns (fraction or None, text), or None while there is nothing to report yet."""
+    def render(frame, elapsed):
+        now = state() or (None, "starting…")
+        percent = f" {round(now[0] * 100):3d}%" if now[0] is not None else ""
+        timer = fmt_secs(elapsed)
+        columns = shutil.get_terminal_size((80, 24)).columns
+        width = 24 if columns >= 72 else 12
+        room = columns - 9 - width - len(percent) - len(timer)
+        return (f"  {spinner_frame(frame)} {progress_bar(now[0], frame, width)}{percent}  {MUTED}{clip(now[1], room)}{RESET}  "
+                f"{DIM}{timer}{RESET}")
+    return LiveLine(render)
     sys.stdout.flush()
 
 
@@ -186,16 +354,14 @@ def follow(client: Client, path: str, payload: dict, watch) -> dict:
 
     thread = threading.Thread(target=post, daemon=True)
     thread.start()
-    while thread.is_alive():
-        try:
-            state = watch()
-        except Refused:
-            state = None
-        if state and sys.stdout.isatty():
-            progress_line(*state)
-        thread.join(0.2)
-    if sys.stdout.isatty():
-        sys.stdout.write("\r\033[K")
+    seen = [None]                       # the last report, drawn by the status line between asks
+    with progress(lambda: seen[0]):
+        while thread.is_alive():
+            try:
+                seen[0] = watch() or seen[0]
+            except Refused:
+                pass
+            thread.join(0.2)
     if "error" in result:
         raise Refused(result["error"])
     return result["body"]
@@ -215,24 +381,23 @@ def load(client: Client, name: str, seq_lens: list[int] | None = None):
 def download(client: Client, name: str):
     """Fetch a model from Hugging Face onto the board; Ctrl-C cancels and keeps what arrived."""
     client.call("/api/hub/download", {"model": name})
+    seen = [None]
     try:
-        while True:
-            model = client.hub()["models"].get(name, {})
-            if model.get("state") != "downloading":
-                break
-            progress = model.get("progress")
-            if progress and sys.stdout.isatty():
-                rate = f" · {progress['bytes_per_second'] / 1e6:.1f} MB/s" if progress["bytes_per_second"] else ""
-                left = f" · about {progress['seconds_left']} s left" if progress["seconds_left"] is not None else ""
-                progress_line(progress["fraction"], f"{size(progress['done_bytes'])} of {size(progress['total_bytes'])}{rate}{left}")
-            time.sleep(0.4)
+        with progress(lambda: seen[0]):
+            while True:
+                model = client.hub()["models"].get(name, {})
+                if model.get("state") != "downloading":
+                    break
+                at = model.get("progress")
+                if at:
+                    rate = f" · {at['bytes_per_second'] / 1e6:.1f} MB/s" if at["bytes_per_second"] else ""
+                    left = f" · about {at['seconds_left']} s left" if at["seconds_left"] is not None else ""
+                    seen[0] = (at["fraction"], f"{size(at['done_bytes'])} of {size(at['total_bytes'])}{rate}{left}")
+                time.sleep(0.4)
     except KeyboardInterrupt:
         client.call("/api/hub/cancel", {"model": name})
-        sys.stdout.write("\r\033[K")
         print(f"{WARN}⚠{RESET} cancelled; what had arrived is kept, and /download {name} continues from there")
         return False
-    if sys.stdout.isatty():
-        sys.stdout.write("\r\033[K")
     if model.get("state") == "on_board":
         print(f"{OK}✔{RESET} {name} is on this board")
         return True
@@ -319,7 +484,8 @@ def compare(session: "Session", text: str):
     payload = ({"yes_no": text} if session.state is None
                else {"state": session.state, "questions": {"answer": {"type": "noul", "instructions": text}}})
     sent = time.perf_counter()
-    body = session.client.call("/api/compare", payload)
+    with spinner("asking every loaded model…"):
+        body = session.client.call("/api/compare", payload)
     trip = (time.perf_counter() - sent) * 1e3
     if session.raw:
         print(json.dumps(body, indent=1))
@@ -346,6 +512,7 @@ class Session:
     def __init__(self, client: Client, budget: int = 0, raw: bool = False):
         self.client, self.budget, self.raw = client, budget, raw
         self.state: str | None = None        # the text questions are about; None is Debate
+        self.image: str | None = None        # a picture the questions are about too, base64; for a model that reads them
         self.last: dict | None = None        # the last request, for /bench
         self._kinds: dict = {}               # model name -> "laya" or "clm"
 
@@ -354,11 +521,14 @@ class Session:
         if model is None:
             raise Refused("no model is on the MLA; /load one")
         payload = {"model": model, "state": state, "questions": {"q": question}}
+        if self.image:
+            payload["images"] = [self.image]
         if self.budget:
             payload["max_len"] = self.budget
         self.last = payload
         sent = time.perf_counter()
-        body = self.client.call("/api/predict", payload)
+        with spinner(f"{model} is deciding…"):
+            body = self.client.call("/api/predict", payload)
         trip = (time.perf_counter() - sent) * 1e3
         if self.raw:
             print(json.dumps(body, indent=1))
@@ -373,11 +543,11 @@ class Session:
     def plain(self, text: str, model: str | None = None) -> tuple:
         """The state and question a plain line stands for.
 
-        With no state, Laya is asked as the Debate page asks it; CLM is asked the way its heads
-        were trained, the question itself as a yes-or-no question with nothing before it.
+        With no state, Laya is asked as the Debate page asks it; CLM and d1 are asked the way
+        they were trained, the question itself as a yes-or-no question with nothing before it.
         """
         if self.state is None:
-            if self.kind(model) == "clm":
+            if self.kind(model) in ("clm", "d1"):
                 return "", {"type": "noul", "instructions": text}
             return "Question: " + text, YES_NO
         return self.state, {"type": "noul", "instructions": text}
@@ -393,6 +563,8 @@ class Session:
         """The same decision without printing it: what the live prompt draws while a line is typed."""
         state, question = self.plain(text, model)
         payload = {"model": model, "state": state, "questions": {"q": question}}
+        if self.image:
+            payload["images"] = [self.image]
         if self.budget:
             payload["max_len"] = self.budget
         sent = time.perf_counter()
@@ -401,6 +573,23 @@ class Session:
         answer = body["answers"]["q"]
         yes = answer["noul"] if answer["type"] == "noul" else answer["probabilities"]["yes"]
         return {"yes": yes, "usage": body["usage"], "trip": (time.perf_counter() - sent) * 1e3, "body": body}
+
+    def bench(self, runs: int):
+        if self.last is None:
+            raise Refused("ask something first; /bench repeats the last question")
+        mla, trips = [], []
+        with progress(lambda: (len(mla) / runs, f"{len(mla)} of {runs}")):
+            for index in range(runs):
+                sent = time.perf_counter()
+                body = self.client.call("/api/predict", self.last)
+                trips.append((time.perf_counter() - sent) * 1e3)
+                mla.append(body["usage"]["mla_ms"])
+        mla.sort(); trips.sort()
+        p95 = lambda values: values[min(len(values) - 1, int(len(values) * 0.95))]
+        print(f"\n  {BOLD}{runs} decisions{RESET} {MUTED}on the {body['usage']['seq_len']}-token graph, {body['usage']['tokens']} tokens{RESET}")
+        print(f"  on the MLA    mean {ACCENT}{BOLD}{sum(mla) / runs:.2f} ms{RESET}  min {mla[0]:.2f}  p95 {p95(mla):.2f}  max {mla[-1]:.2f}")
+        print(f"  round trip    mean {sum(trips) / runs:.2f} ms  min {trips[0]:.2f}  p95 {p95(trips):.2f}  max {trips[-1]:.2f}"
+              f"  {MUTED}({1000 * runs / sum(trips):.0f} decisions a second){RESET}\n")
 
 
 class LivePrompt:
@@ -577,26 +766,6 @@ class LivePrompt:
         except OSError:
             pass
 
-    def bench(self, runs: int):
-        if self.last is None:
-            raise Refused("ask something first; /bench repeats the last question")
-        mla, trips = [], []
-        for index in range(runs):
-            sent = time.perf_counter()
-            body = self.client.call("/api/predict", self.last)
-            trips.append((time.perf_counter() - sent) * 1e3)
-            mla.append(body["usage"]["mla_ms"])
-            if sys.stdout.isatty():
-                progress_line((index + 1) / runs, f"{index + 1} of {runs}")
-        if sys.stdout.isatty():
-            sys.stdout.write("\r\033[K")
-        mla.sort(); trips.sort()
-        p95 = lambda values: values[min(len(values) - 1, int(len(values) * 0.95))]
-        print(f"\n  {BOLD}{runs} decisions{RESET} {MUTED}on the {body['usage']['seq_len']}-token graph, {body['usage']['tokens']} tokens{RESET}")
-        print(f"  on the MLA    mean {ACCENT}{BOLD}{sum(mla) / runs:.2f} ms{RESET}  min {mla[0]:.2f}  p95 {p95(mla):.2f}  max {mla[-1]:.2f}")
-        print(f"  round trip    mean {sum(trips) / runs:.2f} ms  min {trips[0]:.2f}  p95 {p95(trips):.2f}  max {trips[-1]:.2f}"
-              f"  {MUTED}({1000 * runs / sum(trips):.0f} decisions a second){RESET}\n")
-
 
 HELP = f"""{MUTED}
   A line that is not a command is a yes-or-no question. The model on the MLA decides again
@@ -612,6 +781,8 @@ HELP = f"""{MUTED}
   /reset                      reset the accelerator: every model comes off the MLA, other apps' too
 
   /state TEXT                 the text the next questions are about (/state alone: back to plain questions)
+  /image FILE                 a picture the next questions are about too, for a model that reads pictures
+                              (d1); /image alone: no picture
   /yesno QUESTION             a yes-or-no question about the state
   /choice QUESTION | A | B    one of several options; "name: what it covers" describes an option
   /score QUESTION | LOW | HIGH  a level on a scale
@@ -688,9 +859,22 @@ def command(session: Session, line: str) -> bool:
             sure = ""
             print()
         if sure in ("y", "yes"):
-            print(f"{MUTED}  Resetting…{RESET}", flush=True)
-            client.call("/api/mla/reset", {"token": rest} if rest else {})
+            with spinner("resetting the accelerator…"):
+                client.call("/api/mla/reset", {"token": rest} if rest else {})
             print(f"{OK}✔{RESET} The accelerator is reset; /load a model")
+    elif name == "image":
+        if not rest:
+            session.image = None
+            print(f"{MUTED}  No picture.{RESET}")
+        else:
+            try:
+                data = open(os.path.expanduser(rest), "rb").read()
+            except OSError as error:
+                raise Refused(f"cannot read {rest}: {error.strerror}")
+            if len(data) > 11 << 20:
+                raise Refused("that picture is over 11 MB; send a smaller one")
+            session.image = base64.b64encode(data).decode()
+            print(f"{MUTED}  The next questions are about that picture too ({len(data) >> 10} kB). A model that reads text only will say so.{RESET}")
     elif name == "state":
         session.state = rest or None
         print(f"{MUTED}  {'Questions are now about that text.' if rest else 'Back to plain yes-or-no questions.'}{RESET}")

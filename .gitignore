@@ -14,3 +14,5 @@ __pycache__/
 /model-*/
 /webapp.log
 /.reset-token
+/.models-dir
+/.tls/

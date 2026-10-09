@@ -61,6 +61,28 @@
     return link;
   }
 
+  // Dark mode, on or off (theme.js): a moon while it is off, a sun while it is on.
+  function themeButton() {
+    if (!window.theme) return "";
+    const icons = {
+      moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+      sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    };
+    const button = make("button", { className: "header-button", type: "button" });
+    const show = () => {
+      const dark = window.theme.current() === "dark";
+      button.title = dark ? "Dark Mode Is On: Turn It Off" : "Dark Mode Is Off: Turn It On";
+      button.setAttribute("aria-label", "Dark mode");
+      button.setAttribute("aria-pressed", String(dark));
+      button.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" `
+        + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${dark ? icons.sun : icons.moon}</svg>`;
+    };
+    button.onclick = () => window.theme.toggle();
+    addEventListener("themechange", show);
+    show();
+    return button;
+  }
+
   // Settings: the model manager, in a window over the page (settings.js).
   function settingsButton() {
     const button = make("button", { className: "header-button", type: "button", title: "Settings" });
@@ -84,7 +106,7 @@
 
   // The tabs are written here, so a new page is added in one place. The model manager is not
   // one of them: it is Settings, behind the gear.
-  const TABS = [["Debate", "/debate"], ["Questions", "/questions"], ["Compare", "/compare"], ["Games", "/games"]];
+  const TABS = [["Debate", "/debate"], ["Questions", "/questions"], ["Vision", "/vision"], ["Compare", "/compare"], ["Games", "/games"]];
   nav.replaceChildren(...TABS.map(([name, href]) => make("a", { href, textContent: name,
     className: location.pathname === href || location.pathname.startsWith(href + "/") ? "here" : "" })));
 
@@ -96,7 +118,7 @@
       make("span", { className: "brand-text" },
         make("span", { className: "brand-title", textContent: "Neat Decision Studio" }),
         make("span", { className: "brand-sub" }, "Running on ", neatName("SiMa.ai Palette Neat")))),
-    nav, make("span", { className: "header-tools" }, pill, settingsButton(), showcaseButton(), fullscreenButton()));
+    nav, make("span", { className: "header-tools" }, pill, themeButton(), settingsButton(), showcaseButton(), fullscreenButton()));
 
   // A page's own title goes below the bar. The landing page has its own opening instead.
   if (document.body.dataset.home === undefined) header.after(make("div", { className: "pagehead" }, title, tagline));

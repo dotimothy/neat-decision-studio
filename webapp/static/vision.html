@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
+<link rel="stylesheet" href="/static/neat.css">
+<script src="/static/theme.js"></script>
+<style>
+  /* The harness for decision models that read pictures: a set of pictures, the questions asked
+     of every one of them, what each model answered, and how often it was right. Or a camera or
+     a video, decided frame after frame. Colours, fonts and the header come from neat.css. */
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--ink); font-size: 15px; }
+  main { width: 100%; max-width: 1320px; padding: 0 24px 36px; display: grid; gap: 14px;
+         grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); align-items: start; }
+  @media (max-width: 1000px) { main { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 700px) { main { padding: 0 16px 24px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+            padding: 16px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+  h2 { margin: 0; font-size: 12.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); font-weight: 600; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button, .pill { font: inherit; font-size: 13.5px; padding: 5px 13px; border: 1px solid var(--line); border-radius: 999px; background: var(--chip);
+                  color: var(--ink); cursor: pointer; min-width: 0; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { font-weight: 600; }
+  .sets button { background: var(--panel); color: var(--muted); }
+  .sets button.active { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+                        background: color-mix(in srgb, var(--accent) 10%, var(--panel)); font-weight: 600; }
+  .kinds { display: inline-flex; gap: 4px; padding: 4px; background: var(--chip); border: 1px solid var(--line); border-radius: 999px; }
+  .kinds button { border: 0; background: none; color: var(--muted); padding: 4px 15px; }
+  .kinds button.here { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  input[type=text], textarea, select { font: 14.5px/1.4 inherit; font-family: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+                                       border-radius: var(--radius-sm); padding: 7px 10px; width: 100%; min-width: 0; }
+  textarea { resize: vertical; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0; }
+  .error { color: var(--bad); margin: 0; overflow-wrap: anywhere; font-size: 14px; }
+
+  /* The stage: the picture being looked at, or the live video, with what each model said of it. */
+  .stage { position: relative; background: var(--chip); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; min-height: 220px;
+           display: grid; place-items: center; }
+  .stage.over { border-color: var(--accent); outline: 2px dashed var(--accent); outline-offset: -6px; }
+  .stage img, .stage video { display: block; max-width: 100%; max-height: 430px; object-fit: contain; }
+  .stage .empty { padding: 40px 24px; text-align: center; color: var(--muted); max-width: 46ch; }
+  .stage .empty b { display: block; color: var(--ink); font-size: 16px; margin-bottom: 4px; }
+  .stage .said { position: absolute; left: 10px; top: 10px; display: grid; gap: 6px; justify-items: start; pointer-events: none; }
+  .stage .said span { background: color-mix(in srgb, #0b0f14 78%, transparent); color: #fff; border-radius: 999px; padding: 4px 12px 4px 9px; font-size: 13.5px;
+                      font-weight: 600; display: inline-flex; gap: 7px; align-items: center; backdrop-filter: blur(4px); }
+  .stage .said i { width: 9px; height: 9px; border-radius: 50%; }
+  .stage .said small { font-weight: 400; opacity: .8; }
+  .read { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .strip { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px; }
+  .strip .thumb { position: relative; flex: none; width: 92px; height: 70px; border-radius: 9px; overflow: hidden; border: 2px solid transparent; background: var(--chip);
+                  cursor: pointer; padding: 0; }
+  .strip .thumb.on { border-color: var(--accent); }
+  .strip .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .strip .thumb .mark { position: absolute; right: 4px; bottom: 4px; width: 17px; height: 17px; border-radius: 50%; font-size: 11px; line-height: 17px;
+                        text-align: center; color: #fff; font-weight: 700; background: var(--faint); }
+  .strip .thumb .mark.right { background: var(--good); } .strip .thumb .mark.wrong { background: var(--bad); }
+  .strip .thumb .mark.busy { background: var(--warn); }
+  .strip .add { flex: none; width: 92px; height: 70px; border-radius: 9px; border: 1px dashed var(--line); background: none; color: var(--muted); font-size: 12.5px;
+                line-height: 1.25; padding: 4px; }
+  canvas.line { width: 100%; height: 96px; display: block; background: var(--chip); border: 1px solid var(--line); border-radius: 10px; }
+
+  /* Questions. */
+  .who button { background: var(--panel); color: var(--muted); display: inline-flex; align-items: center; gap: 7px; }
+  .who button i { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+  .who button.in { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); }
+  .question { border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: grid; gap: 8px; cursor: pointer; }
+  .question.focus { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+  .question .top { display: grid; grid-template-columns: 118px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .question select { padding-right: 30px; }
+
+  /* The answers: a picture a row, a model a column, for the question in focus. */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-weight: 600; font-size: 12.5px; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  td { padding: 6px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); vertical-align: middle; }
+  tr.on td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  tbody tr { cursor: pointer; }
+  td.pic { width: 64px; } td.pic img { width: 56px; height: 42px; object-fit: cover; border-radius: 6px; display: block; }
+  td select { padding: 4px 28px 4px 8px; font-size: 13.5px; max-width: 150px; }
+  .verdict { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 2px 10px; font-weight: 600; border: 1px solid var(--line);
+             background: var(--chip); max-width: 100%; }
+  .verdict.right { border-color: color-mix(in srgb, var(--good) 60%, var(--line)); background: color-mix(in srgb, var(--good) 14%, var(--panel)); }
+  .verdict.wrong { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); background: color-mix(in srgb, var(--bad) 13%, var(--panel)); }
+  .verdict small { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+  td .ms { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; margin-left: 6px; white-space: nowrap; }
+  tfoot td { border-bottom: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+  tfoot td small { display: block; font-weight: 400; color: var(--muted); }
+  .detail { display: grid; gap: 10px; }
+  .detail .q { display: grid; gap: 6px; }
+  .detail .q > b { font-size: 14px; }
+  .detail .answer { display: grid; grid-template-columns: 9px minmax(70px, 30%) minmax(0, 1fr) 46px; gap: 8px; align-items: center; font-size: 13.5px; }
+  .detail .answer i { width: 9px; height: 9px; border-radius: 50%; }
+  .detail .answer .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .detail .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .detail .track u { display: block; height: 100%; border-radius: 999px; }
+  .detail .pct { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+  .stat { background: var(--chip); border-radius: 10px; padding: 9px 11px; }
+  .stat b { display: block; font-size: 17px; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Vision</h1>
+  <p>Questions about pictures: a test set, or a live video, decided on the Modalix MLA</p>
+  <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a class="here" href="/vision">Vision</a><a href="/compare">Compare</a><a href="/games">Games</a></nav>
+</header>
+<script src="/static/brand.js"></script>
+<main>
+  <section>
+    <div class="bar">
+      <div class="kinds" id="modes"><button type="button" data-mode="set" class="here">Test Set</button><button type="button" data-mode="live">Live</button></div>
+      <div class="row" id="liveButtons" hidden>
+        <button type="button" id="camera">Use Camera</button>
+        <button type="button" id="openVideo">Open Video File</button>
+        <button type="button" id="keep" disabled title="Add what is on screen to the test set">Keep Frame</button>
+        <button type="button" id="stop" disabled>Stop</button>
+        <input type="file" id="videoFile" accept="video/*" hidden>
+      </div>
+    </div>
+    <div id="setsBlock">
+      <h2 style="margin-bottom:8px">Example Sets</h2>
+      <div class="row sets" id="sets"></div>
+    </div>
+    <div class="stage" id="stage">
+      <div class="empty" id="empty"></div>
+      <img id="shown" alt="" hidden>
+      <video id="video" muted playsinline loop hidden></video>
+      <div class="said" id="said"></div>
+    </div>
+    <div class="read" id="read">&nbsp;</div>
+    <div class="strip" id="strip"></div>
+    <canvas class="line" id="line" width="900" height="192" hidden></canvas>
+    <p class="hint" id="liveHint" hidden></p>
+    <input type="file" id="files" accept="image/*" multiple hidden>
+  </section>
+
+  <section>
+    <div>
+      <h2 style="margin-bottom:8px">Models That Read Pictures</h2>
+      <div class="row who" id="who"></div>
+    </div>
+    <div class="bar">
+      <h2>Questions</h2>
+      <span class="row"><span class="hint">Add:</span>
+        <button type="button" data-add="noul">+ Yes / No</button><button type="button" data-add="choice">+ Choice</button><button type="button" data-add="score">+ Score</button></span>
+    </div>
+    <div id="questions" style="display:grid;gap:8px"></div>
+    <label class="hint" style="display:grid;gap:4px">Context, if the pictures need some: a sentence the questions are read with
+      <input type="text" id="context" autocomplete="off" placeholder="A driver is approaching this signal."></label>
+    <p class="error" id="error" hidden></p>
+    <div class="bar"><h2 id="tableTitle">Answers</h2><span class="hint" id="progress"></span></div>
+    <div style="overflow-x:auto"><table id="table"></table></div>
+    <div class="stats" id="stats"></div>
+    <h2 id="detailTitle" hidden>This Picture, Every Question</h2>
+    <div class="detail" id="detail"></div>
+  </section>
+</main>
+<script src="/static/model-picker.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  for (const child of children) node.append(child);
+  return node;
+};
+const COLOURS = ["#16c8a6", "#3a86ec", "#a9c81c", "#f2801d", "#4bb54a", "#b06be0"];   // as Settings colours them
+
+// The example sets: pictures from Wikimedia Commons that are in the public domain
+// (static/samples/SOURCES.md), the questions a camera at such a place would be there to answer,
+// and for each picture what a person would say. A set is a small test: the table counts how
+// often each model agrees with the person.
+const SETS = [
+  { name: "Shelf Check", questions: [
+      { id: "restock", type: "noul", instructions: "Does this shelf need restocking?" },
+      { id: "fill", type: "score", instructions: "How full are the shelves?", options: ["empty", "mostly empty", "about half full", "fully stocked"] } ],
+    pictures: [["shelf-full", { restock: "no", fill: "3" }], ["shelf-empty", { restock: "yes", fill: "1" }],
+               ["shelf-bare", { restock: "yes", fill: "1" }], ["shelf-produce", { restock: "yes", fill: "1" }]] },
+  { name: "Warehouse Floor", questions: [
+      { id: "forklift", type: "noul", instructions: "Is there a forklift in the picture?" },
+      { id: "wet_floor", type: "noul", instructions: "Is there a wet floor warning sign in the picture?" },
+      { id: "scene", type: "choice", instructions: "What does the picture show?",
+        options: [["vehicle", "A forklift or another vehicle at work"], ["sign", "A warning sign on a floor"], ["shelves", "Shelves of goods and nothing else"]] } ],
+    pictures: [["forklift-orange", { forklift: "yes", wet_floor: "no", scene: "vehicle" }], ["forklift-aisle", { forklift: "yes", wet_floor: "no", scene: "vehicle" }],
+               ["wet-floor", { forklift: "no", wet_floor: "yes", scene: "sign" }], ["wet-floor-cone", { forklift: "no", wet_floor: "yes", scene: "sign" }]] },
+  { name: "Road", questions: [
+      { id: "stop_sign", type: "noul", instructions: "Is there a stop sign in the picture?" },
+      { id: "traffic", type: "score", instructions: "How heavy is the traffic?", options: ["no vehicles", "one or two vehicles", "steady traffic", "a traffic jam"] },
+      { id: "flooded", type: "noul", instructions: "Is the area flooded?" } ],
+    pictures: [["stop-sign", { stop_sign: "yes", traffic: "0", flooded: "no" }], ["traffic-jam", { stop_sign: "no", traffic: "3", flooded: "no" }],
+               ["country-road", { stop_sign: "yes", traffic: "1", flooded: "no" }], ["flooded-lot", { stop_sign: "no", flooded: "yes" }]] },
+  { name: "Wildfire Watch", questions: [
+      { id: "smoke", type: "noul", instructions: "Is there smoke from a fire in the picture?" },
+      { id: "alarm", type: "score", instructions: "How urgently should someone look at this?", options: ["no need", "worth a look", "soon", "now"] } ],
+    pictures: [["wildfire", { smoke: "yes", alarm: "3" }], ["smoke-plume", { smoke: "yes" }], ["mountains", {}], ["clear-day", { smoke: "no", alarm: "0" }]] },
+  { name: "Animals", questions: [
+      { id: "animal", type: "choice", instructions: "Which animal is in the picture?", options: [["cat", "A cat"], ["dog", "A dog"], ["none", "No animal"]] },
+      { id: "cone", type: "noul", instructions: "Is the animal wearing a cone collar?" },
+      { id: "fruit", type: "noul", instructions: "Is there fruit in the picture?" } ],
+    pictures: [["cat-window", { animal: "cat", cone: "no", fruit: "no" }], ["cat-cone", { animal: "cat", cone: "yes", fruit: "no" }],
+               ["dog", { animal: "dog", cone: "no", fruit: "no" }], ["apples", { animal: "none", cone: "no", fruit: "yes" }]] },
+];
+
+let info = null, mode = "set";
+let pictures = [];          // { name, data, width, height, expect: {question id: answer}, results: {model: reply}, stamp, busy }
+let questions = [];         // { id, type, instructions, options }
+let selected = 0, focus = null, chosen = null, pumping = false, serial = 0;
+const reading = {};         // model -> the milliseconds its vision tower last took on a new picture
+const title = (name) => CHECKPOINT_SHORT[info?.models[name]?.checkpoint] || name;
+const seeing = () => (info?.loaded || []).filter((name) => info.models[name]?.images);
+const taking = () => seeing().filter((name) => !chosen || chosen.has(name));
+const colour = (name) => COLOURS[Math.max(0, seeing().indexOf(name)) % COLOURS.length];
+
+// ---- What is asked ----
+function built() {
+  const out = {};
+  for (const q of questions) {
+    if (!q.instructions.trim()) continue;
+    const def = { type: q.type, instructions: q.instructions.trim() };
+    if (q.type === "choice") {
+      const criteria = {};
+      for (const [label, description] of q.options) if (label.trim()) criteria[label.trim()] = description.trim();
+      if (Object.keys(criteria).length < 2) continue;
+      def.criteria = criteria;
+    } else if (q.type === "score") {
+      const levels = q.options.map((level) => level.trim()).filter(Boolean);
+      if (levels.length < 2) continue;
+      def.criteria = levels;
+    }
+    out[q.id] = def;
+  }
+  return out;
+}
+const stampNow = () => JSON.stringify([built(), $("context").value.trim(), taking()]);
+
+// What a model said, as the one word it is compared by: yes or no, the option, the level.
+function said(answer) {
+  if (!answer) return null;
+  if (answer.type === "noul") return { word: answer.noul >= 0.5 ? "yes" : "no", share: Math.max(answer.noul, 1 - answer.noul), value: answer.noul };
+  const top = Object.entries(answer.probabilities).sort((a, b) => b[1] - a[1])[0];
+  if (answer.type === "choice") return { word: answer.choice, share: top[1], value: top[1] };
+  const levels = Object.keys(answer.probabilities).length;
+  return { word: top[0], share: top[1], value: answer.score / Math.max(1, levels - 1), score: answer.score };
+}
+// The answers a question can have, as [value, how it is shown].
+function answersOf(q) {
+  if (q.type === "noul") return [["yes", "yes"], ["no", "no"]];
+  if (q.type === "choice") return q.options.filter(([label]) => label.trim()).map(([label]) => [label.trim(), label.trim()]);
+  return q.options.map((level, i) => [String(i), `${i} · ${level}`]);
+}
+const shown = (q, word) => (answersOf(q).find(([value]) => value === word) || [word, word])[1];
+
+function renderQuestions() {
+  if (!questions.some((q) => q.id === focus)) focus = questions[0]?.id || null;
+  $("questions").replaceChildren(...questions.map((q) => {
+    const kind = el("select", {}, ...[["noul", "Yes / No"], ["choice", "Choice"], ["score", "Score"]].map(([value, text]) => el("option", { value, textContent: text, selected: q.type === value })));
+    kind.onchange = () => { q.type = kind.value; q.options = q.type === "choice" ? [["first", ""], ["second", ""]] : q.type === "score" ? ["low", "middle", "high"] : []; forget(q.id); renderQuestions(); changed(); };
+    const text = el("input", { type: "text", value: q.instructions, placeholder: "What should be decided about the picture?" });
+    text.oninput = () => { q.instructions = text.value; changed(); };
+    const remove = el("button", { type: "button", textContent: "Remove" });
+    remove.onclick = (event) => { event.stopPropagation(); questions = questions.filter((other) => other !== q); renderQuestions(); changed(); };
+    const node = el("div", { className: "question" + (q.id === focus ? " focus" : "") }, el("div", { className: "top" }, kind, text, remove));
+    if (q.type !== "noul") {
+      const options = el("textarea", { rows: Math.max(2, q.options.length), value: q.type === "choice" ? q.options.map(([label, description]) => description ? `${label}: ${description}` : label).join("\n") : q.options.join("\n"),
+                                       placeholder: q.type === "choice" ? "one option a line, as “name: what it covers”" : "one level a line, lowest first" });
+      options.oninput = () => {
+        const lines = options.value.split("\n").map((line) => line.trim()).filter(Boolean);
+        q.options = q.type === "score" ? lines : lines.map((line) => { const at = line.indexOf(":"); return at < 0 ? [line, ""] : [line.slice(0, at).trim(), line.slice(at + 1).trim()]; });
+        changed();
+      };
+      node.append(options);
+    }
+    node.onclick = (event) => { if (event.target.tagName === "BUTTON" || focus === q.id) return; focus = q.id; for (const other of $("questions").children) other.classList.remove("focus"); node.classList.add("focus"); draw(); };
+    return node;
+  }));
+}
+const forget = (id) => { for (const picture of pictures) delete picture.expect[id]; };
+for (const button of document.querySelectorAll("[data-add]")) button.onclick = () => {
+  const type = button.dataset.add;
+  let id = type === "noul" ? "question" : type; for (let n = 2; questions.some((q) => q.id === id); n++) id = `${type === "noul" ? "question" : type}_${n}`;
+  questions.push({ id, type, instructions: "", options: type === "choice" ? [["first", ""], ["second", ""]] : type === "score" ? ["low", "middle", "high"] : [] });
+  focus = id; renderQuestions(); $("questions").lastChild.querySelector("input").focus();
+};
+let typing = null;
+function changed() { clearTimeout(typing); typing = setTimeout(() => { draw(); pump(); }, 350); }
+$("context").oninput = changed;
+
+// ---- The pictures ----
+// A picture goes to the board as a JPEG no larger than 1536 pixels on its longer side; the
+// board resizes it again, to the at most 512 x 512 pixels a model reads.
+async function toPicture(blob, name, expect = {}) {
+  const bitmap = await createImageBitmap(blob);
+  const longer = Math.max(bitmap.width, bitmap.height);
+  let data;
+  if (["image/jpeg", "image/png"].includes(blob.type) && blob.size <= 3 << 20 && longer <= 2048) {
+    data = await new Promise((done) => { const reader = new FileReader(); reader.onload = () => done(reader.result); reader.readAsDataURL(blob); });
+  } else {
+    const scale = Math.min(1, 1536 / longer);
+    const canvas = Object.assign(document.createElement("canvas"), { width: Math.round(bitmap.width * scale), height: Math.round(bitmap.height * scale) });
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    data = canvas.toDataURL("image/jpeg", 0.92);
+  }
+  return { name, data, width: bitmap.width, height: bitmap.height, expect: { ...expect }, results: {}, stamp: "", busy: false };
+}
+async function addFiles(files) {
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) continue;
+    try { pictures.push(await toPicture(file, file.name || "Pasted Picture")); } catch (_) { fail("This browser could not read " + (file.name || "that picture") + "."); }
+  }
+  for (const button of $("sets").children) button.classList.remove("active");
+  selected = pictures.length - 1;
+  draw(); pump();
+}
+async function loadSet(set, button) {
+  const mine = ++serial;
+  setMode("set");
+  for (const other of $("sets").children) other.classList.toggle("active", other === button);
+  questions = JSON.parse(JSON.stringify(set.questions)).map((q) => ({ options: [], ...q }));
+  focus = questions[0].id; pictures = []; selected = 0; $("context").value = "";
+  renderQuestions(); draw();
+  for (const [name, expect] of set.pictures) {
+    let picture;
+    try { picture = await toPicture(await (await fetch(`/static/samples/${name}.jpg`)).blob(), name.replace(/-/g, " "), expect); } catch (_) { continue; }
+    if (mine !== serial) return;          // another set was chosen meanwhile
+    pictures.push(picture);
+    draw(); pump();
+  }
+}
+$("files").onchange = () => { addFiles([...$("files").files]); $("files").value = ""; };
+for (const type of ["dragenter", "dragover"]) $("stage").addEventListener(type, (event) => { event.preventDefault(); $("stage").classList.add("over"); });
+for (const type of ["dragleave", "drop"]) $("stage").addEventListener(type, (event) => { event.preventDefault(); $("stage").classList.remove("over"); });
+$("stage").addEventListener("drop", (event) => { const files = [...event.dataTransfer.files]; const video = files.find((file) => file.type.startsWith("video/")); video ? playFile(video) : addFiles(files); });
+document.addEventListener("paste", (event) => { const files = [...(event.clipboardData?.files || [])].filter((file) => file.type.startsWith("image/")); if (files.length) { event.preventDefault(); addFiles(files); } });
+
+// The size a model reads a picture at: multiples of 32 pixels holding 64 to 256 positions (the
+// board's own arithmetic, d1_sima/hostio.py, with halves rounded to even as it rounds them).
+function readAs(width, height) {
+  const even = (x) => { const r = Math.round(x); return Math.abs(x % 1) === 0.5 && r % 2 ? r - 1 : r; };
+  let h = Math.max(32, even(height / 32) * 32), w = Math.max(32, even(width / 32) * 32);
+  if (h * w > 262144) { const beta = Math.sqrt(height * width / 262144); h = Math.max(32, Math.floor(height / beta / 32) * 32); w = Math.max(32, Math.floor(width / beta / 32) * 32); }
+  else if (h * w < 65536) { const beta = Math.sqrt(65536 / (height * width)); h = Math.ceil(height * beta / 32) * 32; w = Math.ceil(width * beta / 32) * 32; }
+  return { width: w, height: h, positions: h * w / 1024 };
+}
+
+// ---- Asking ----
+// The models are asked one after another, not together: the MLA runs one graph at a time, and a
+// model asked beside another would be timed waiting for it.
+async function ask(data) {
+  const results = {};
+  for (const model of taking()) {
+    const sending = { model, state: $("context").value.trim() || null, questions: built(), images: [data] };
+    try { results[model] = await (await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sending) })).json(); }
+    catch (error) { return { error: "The board did not answer: " + error.message }; }
+    if (results[model].not_loaded) return { error: results[model].error, not_loaded: true };
+    // What reading a picture takes: kept from when it was last read. The board remembers the
+    // pictures it has just read, and one of those costs nothing to read again.
+    if (results[model].usage?.vision_ms) reading[model] = results[model].usage.vision_ms;
+  }
+  return { results };
+}
+function fail(message) { $("error").hidden = !message; $("error").textContent = message || ""; }
+// One picture at a time, each asked every question of every chosen model, until all of them
+// have answers to what is asked now.
+async function pump() {
+  if (pumping || mode !== "set") return;
+  pumping = true;
+  for (;;) {
+    const stamp = stampNow();
+    const next = pictures.find((picture) => picture.stamp !== stamp);
+    if (!next || !taking().length || !Object.keys(built()).length || mode !== "set") break;
+    next.busy = true; draw();
+    const body = await ask(next.data);
+    next.busy = false;
+    if (body.error && !body.results) { fail(body.error); if (body.not_loaded) await refresh(); break; }
+    fail("");
+    next.results = body.results; next.stamp = stamp;
+    draw();
+  }
+  pumping = false;
+  draw();
+}
+
+// ---- Drawing ----
+function verdictClass(picture, q, word) { const want = picture.expect[q.id]; return !want || word == null ? "" : want === word ? " right" : " wrong"; }
+function draw() {
+  const models = taking(), q = questions.find((other) => other.id === focus), asked = built();
+  // Who.
+  $("who").replaceChildren(...(seeing().length ? seeing().map((name) => {
+    const button = el("button", { type: "button", className: taking().includes(name) ? "in" : "" }, el("i", { style: `background:${colour(name)}` }), CHECKPOINT_TITLES[info.models[name].checkpoint] || name);
+    button.onclick = () => { chosen = new Set(taking()); chosen.has(name) ? chosen.delete(name) : chosen.add(name); draw(); pump(); };
+    return button;
+  }) : [el("span", { className: "hint", textContent: info ? "No loaded model reads pictures. Load d1 Omni or d1 3B in Settings, behind the gear." : "Asking the board…" })]));
+  if (mode === "live") return drawLive();
+
+  // The stage and the strip.
+  const picture = pictures[selected];
+  $("empty").hidden = Boolean(picture); $("shown").hidden = !picture; $("video").hidden = true;
+  $("empty").replaceChildren(el("b", { textContent: "Drop Pictures Here" }), "or paste them, or pick an example set above. Every picture is asked every question, and each model’s answers are set side by side.");
+  if (picture && $("shown").src !== picture.data) $("shown").src = picture.data;
+  const size = picture && readAs(picture.width, picture.height);
+  $("read").textContent = picture ? `${picture.name} · ${picture.width} × ${picture.height} pixels, read at ${size.width} × ${size.height} as ${size.positions} positions` : " ";
+  $("said").replaceChildren(...(picture && q ? models.map((name) => {
+    const answer = said(picture.results[name]?.answers?.[q.id]);
+    return answer ? el("span", {}, el("i", { style: `background:${colour(name)}` }), shown(q, answer.word), el("small", { textContent: `${Math.round(answer.share * 100)}% · ${title(name)}` })) : "";
+  }) : []));
+  $("strip").replaceChildren(...pictures.map((item, index) => {
+    const first = q && models.length ? said(item.results[models[0]]?.answers?.[q.id]) : null;
+    const state = item.busy ? "busy" : first ? verdictClass(item, q, first.word).trim() : "";
+    const thumb = el("button", { type: "button", className: "thumb" + (index === selected ? " on" : ""), title: item.name }, el("img", { src: item.data, alt: item.name }),
+                     el("span", { className: "mark " + state, textContent: item.busy ? "…" : state === "right" ? "✓" : state === "wrong" ? "✗" : first ? "·" : "" }));
+    thumb.onclick = () => { selected = index; draw(); };
+    return thumb;
+  }), Object.assign(el("button", { type: "button", className: "add", textContent: "+ Add Pictures" }), { onclick: () => $("files").click() }));
+
+  // The table: the question in focus, a picture a row.
+  $("tableTitle").textContent = q ? `Answers: ${q.instructions || "the question in focus"}` : "Answers";
+  const waiting = pictures.filter((item) => item.stamp !== stampNow()).length;
+  $("progress").textContent = !pictures.length ? "" : waiting ? `${pictures.length - waiting} of ${pictures.length} pictures decided…` : `${pictures.length} pictures`;
+  if (!q || !pictures.length || !asked[q.id]) { $("table").replaceChildren(); $("stats").replaceChildren(); $("detail").replaceChildren(); $("detailTitle").hidden = true; return; }
+  const head = el("tr", {}, el("th", { textContent: "Picture" }), el("th", { textContent: "Should Be" }), ...models.map((name) => el("th", {}, el("i", { style: `background:${colour(name)}` }), title(name))));
+  const tally = Object.fromEntries(models.map((name) => [name, { right: 0, of: 0, ms: 0, n: 0 }]));
+  const body = pictures.map((item, index) => {
+    const want = el("select", { title: "What a person would answer; the models are counted against it" }, el("option", { value: "", textContent: "not said" }),
+                    ...answersOf(q).map(([value, text]) => el("option", { value, textContent: text, selected: item.expect[q.id] === value })));
+    want.onclick = (event) => event.stopPropagation();
+    want.onchange = () => { want.value ? item.expect[q.id] = want.value : delete item.expect[q.id]; draw(); };
+    const row = el("tr", { className: index === selected ? "on" : "" }, el("td", { className: "pic" }, el("img", { src: item.data, alt: "" })), el("td", {}, want),
+      ...models.map((name) => {
+        const reply = item.results[name], answer = said(reply?.answers?.[q.id]);
+        if (reply?.error) return el("td", { className: "error", textContent: reply.error });
+        if (!answer) return el("td", { className: "hint", textContent: item.busy ? "deciding…" : "" });
+        const state = verdictClass(item, q, answer.word), sums = tally[name];
+        if (state) { sums.of++; sums.right += state === " right"; }
+        sums.ms += reply.usage.latency_ms; sums.n++;
+        return el("td", {}, el("span", { className: "verdict" + state }, shown(q, answer.word), el("small", { textContent: Math.round(answer.share * 100) + "%" })),
+                  el("span", { className: "ms", textContent: reply.usage.latency_ms.toFixed(0) + " ms" }));
+      }));
+    row.onclick = () => { selected = index; draw(); };
+    return row;
+  });
+  const foot = el("tr", {}, el("td", {}), el("td", { className: "hint", textContent: "agrees with the person" }),
+    ...models.map((name) => el("td", {}, tally[name].of ? `${tally[name].right} of ${tally[name].of}` : "–", el("small", { textContent: tally[name].n ? `${(tally[name].ms / tally[name].n).toFixed(0)} ms a picture, all questions` : "" }))));
+  $("table").replaceChildren(el("thead", {}, head), el("tbody", {}, ...body), el("tfoot", {}, foot));
+
+  // Every question over every picture, a model a tile: the set's score.
+  const stat = (value, label) => el("div", { className: "stat" }, el("b", { textContent: value }), el("span", { textContent: label }));
+  $("stats").replaceChildren(...models.flatMap((name) => {
+    let right = 0, of = 0;
+    for (const item of pictures) for (const other of questions) {
+      const answer = said(item.results[name]?.answers?.[other.id]), want = item.expect[other.id];
+      if (answer && want) { of++; right += want === answer.word; }
+    }
+    return [stat(of ? `${right} / ${of}` : "–", `${title(name)}: right over every question`),
+            stat(reading[name] ? reading[name].toFixed(0) + " ms" : "Read Before", `${title(name)}: reading a new picture`)];
+  }));
+
+  drawDetail(picture?.results, "This Picture, Every Question");
+}
+// One picture or frame, every question: what each model answered and how sure it was.
+function drawDetail(results, heading) {
+  const asked = built(), models = taking();
+  $("detailTitle").hidden = !results || !Object.keys(results).length;
+  $("detailTitle").textContent = heading;
+  $("detail").replaceChildren(...(results ? questions.filter((other) => asked[other.id]).map((other) => el("div", { className: "q" }, el("b", { textContent: other.instructions }),
+    ...models.flatMap((name) => {
+      const top = said(results[name]?.answers?.[other.id]);
+      if (!top) return [];
+      return [el("div", { className: "answer" }, el("i", { style: `background:${colour(name)}` }),
+        el("span", { className: "name", textContent: `${title(name)}: ${shown(other, top.word)}` }), el("div", { className: "track" }, el("u", { style: `width:${top.share * 100}%;background:${colour(name)}` })),
+        el("span", { className: "pct", textContent: (top.share * 100).toFixed(0) + "%" }))];
+    }))) : []));
+}
+// Where an answer sits on the live line, 0 at the bottom to 1 at the top: how sure of yes, the
+// level, or which of the options (the first at the top).
+function height(q, answer) {
+  if (!q || !answer) return null;
+  if (q.type === "noul") return answer.value;
+  if (q.type === "score") return answer.value;
+  const labels = answersOf(q).map(([value]) => value), at = labels.indexOf(answer.word);
+  return at < 0 || labels.length < 2 ? null : 1 - at / (labels.length - 1);
+}
+
+// ---- Live: a camera or a video, decided frame after frame ----
+let stream = null, running = false, history = [], frames = 0, since = 0, last = null;
+function setMode(next) {
+  if (mode === next) return;
+  mode = next;
+  for (const button of $("modes").children) button.classList.toggle("here", button.dataset.mode === mode);
+  for (const id of ["setsBlock", "strip", "table", "stats", "tableTitle", "progress"]) $(id).hidden = mode === "live";
+  for (const id of ["liveButtons", "line", "liveHint"]) $(id).hidden = mode !== "live";
+  if (mode !== "live") stopLive();
+  $("camera").disabled = !navigator.mediaDevices?.getUserMedia;
+  $("camera").title = $("camera").disabled ? "A browser gives a page its camera only over HTTPS or on the machine itself: open this page as https://, or in the board’s own browser, or open a video file" : "";
+  draw(); if (mode === "set") pump();
+}
+for (const button of $("modes").children) button.onclick = () => setMode(button.dataset.mode);
+function stopLive() {
+  running = false;
+  if (stream) { for (const track of stream.getTracks()) track.stop(); stream = null; }
+  const video = $("video");
+  video.pause(); video.srcObject = null; if (video.src) { URL.revokeObjectURL(video.src); video.removeAttribute("src"); }
+  $("stop").disabled = $("keep").disabled = true; last = null;
+}
+async function begin() { history = []; frames = 0; since = performance.now(); $("stop").disabled = $("keep").disabled = false; draw(); try { await $("video").play(); } catch (_) { /* shown paused */ } if (!running) loop(); }
+$("camera").onclick = async () => {
+  stopLive();
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, facingMode: "environment" } }); } catch (error) { return fail("The camera could not be opened: " + error.message); }
+  $("video").srcObject = stream; begin();
+};
+function playFile(file) { setMode("live"); stopLive(); $("video").src = URL.createObjectURL(file); begin(); }
+$("openVideo").onclick = () => $("videoFile").click();
+$("videoFile").onchange = () => { if ($("videoFile").files[0]) playFile($("videoFile").files[0]); $("videoFile").value = ""; };
+$("stop").onclick = () => { stopLive(); draw(); };
+function grab() {
+  const video = $("video");
+  if (!video.videoWidth) return null;
+  const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+  const canvas = Object.assign(document.createElement("canvas"), { width: Math.round(video.videoWidth * scale), height: Math.round(video.videoHeight * scale) });
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+  return { data: canvas.toDataURL("image/jpeg", 0.85), width: canvas.width, height: canvas.height };
+}
+$("keep").onclick = () => { const frame = grab(); if (!frame) return; pictures.push({ name: `frame ${pictures.length + 1}`, ...frame, expect: {}, results: {}, stamp: "", busy: false }); selected = pictures.length - 1; $("keep").textContent = "Kept"; setTimeout(() => $("keep").textContent = "Keep Frame", 900); };
+// As fast as the board answers: a frame is taken when the answer to the one before is back.
+async function loop() {
+  running = true;
+  while (running && mode === "live") {
+    const frame = grab();
+    if (!frame || !taking().length || !Object.keys(built()).length) { await new Promise((done) => setTimeout(done, 200)); continue; }
+    const body = await ask(frame.data);
+    if (!running) break;
+    if (body.error && !body.results) { fail(body.error); await new Promise((done) => setTimeout(done, 800)); continue; }
+    fail("");
+    last = { ...frame, results: body.results }; frames++;
+    const q = questions.find((other) => other.id === focus);
+    history.push(Object.fromEntries(taking().map((name) => [name, height(q, said(body.results[name]?.answers?.[q?.id]))])));
+    if (history.length > 120) history.shift();
+    drawLive();
+  }
+  running = false;
+}
+function drawLive() {
+  const q = questions.find((other) => other.id === focus), models = taking(), on = Boolean($("video").srcObject || $("video").src);
+  $("empty").hidden = on; $("shown").hidden = true; $("video").hidden = !on;
+  $("empty").replaceChildren(el("b", { textContent: "A Camera or a Video" }), "Each frame is asked the questions, as fast as the board answers. Drop a video file here, or use the buttons above.");
+  $("said").replaceChildren(...(last && q ? models.map((name) => {
+    const answer = said(last.results[name]?.answers?.[q.id]);
+    return answer ? el("span", {}, el("i", { style: `background:${colour(name)}` }), shown(q, answer.word), el("small", { textContent: `${Math.round(answer.share * 100)}% · ${title(name)}` })) : "";
+  }) : []));
+  const size = last && readAs(last.width, last.height), elapsed = (performance.now() - since) / 1000;
+  const cost = last ? models.map((name) => last.results[name]?.usage ? `${title(name)} ${last.results[name].usage.latency_ms.toFixed(0)} ms` : "").filter(Boolean).join(" · ") : "";
+  $("read").textContent = last ? `${(frames / Math.max(elapsed, 0.001)).toFixed(1)} frames a second decided · ${cost} · read at ${size.width} × ${size.height} as ${size.positions} positions` : " ";
+  $("liveHint").textContent = q ? `The line is the question in focus over the last frames: ${q.type === "noul" ? "how sure of yes" : q.type === "score" ? "the level" : "which option"}. Click another question to follow it.` : "Add a question to decide about each frame.";
+  drawDetail(last?.results, "This Frame, Every Question");
+  // The line: the question in focus, a model a colour, the newest frame at the right.
+  const canvas = $("line"), g = canvas.getContext("2d"), W = canvas.width, H = canvas.height;
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = getComputedStyle(document.body).getPropertyValue("--line"); g.lineWidth = 1; g.setLineDash([4, 6]);
+  // What the heights mean, written at the left: yes and no, the lowest and highest level, the options.
+  const marks = !q ? [] : q.type === "noul" ? [[1, "yes"], [0, "no"]] : q.type === "score" ? [[1, q.options[q.options.length - 1] || ""], [0, q.options[0] || ""]]
+    : answersOf(q).map(([value], at, all) => [all.length < 2 ? 1 : 1 - at / (all.length - 1), value]);
+  const y = (value) => H - 22 - value * (H - 44);
+  g.font = "22px Inter, system-ui, sans-serif"; g.textBaseline = "middle";
+  for (const [value, text] of marks) {
+    g.beginPath(); g.moveTo(0, y(value)); g.lineTo(W, y(value)); g.stroke();
+    g.fillStyle = getComputedStyle(document.body).getPropertyValue("--muted"); g.fillText(text, 10, y(value) - 13 < 12 ? y(value) + 15 : y(value) - 13);
+  }
+  g.setLineDash([]);
+  for (const name of models) {
+    g.strokeStyle = colour(name); g.lineWidth = 4; g.lineJoin = "round"; g.beginPath();
+    history.forEach((entry, index) => {
+      if (entry[name] == null) return;
+      const x = W - 6 - (history.length - 1 - index) * ((W - 12) / 119);
+      index && history[index - 1][name] != null ? g.lineTo(x, y(entry[name])) : g.moveTo(x, y(entry[name]));
+    });
+    g.stroke();
+  }
+}
+
+// ---- The board ----
+let known = "";
+async function refresh() {
+  try { info = await (await fetch("/api/info")).json(); } catch (_) { return; }
+  const now = seeing().join("\n");
+  if (now !== known) { known = now; if (chosen) chosen = new Set([...chosen].filter((name) => seeing().includes(name))); draw(); pump(); }
+}
+addEventListener("settings-closed", refresh);
+(async function poll() { await refresh(); setTimeout(poll, 2000); })();
+
+for (const set of SETS) { const button = el("button", { type: "button", textContent: set.name }); button.onclick = () => loadSet(set, button); $("sets").append(button); }
+renderQuestions(); draw();
+loadSet(SETS[0], $("sets").firstChild);
+</script>
+</body>
+</html>

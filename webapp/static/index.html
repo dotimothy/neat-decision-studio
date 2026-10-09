@@ -122,6 +122,7 @@
         overflow-x: auto; font: 12.5px/1.4 var(--mono); margin: 8px 0 0; max-height: 320px; }
 </style>
 <link rel="stylesheet" href="/static/neat.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <header>
@@ -138,6 +139,13 @@
     <div class="row presets" id="presets"></div>
     <label class="small" for="state">State &mdash; the text or JSON to decide on</label>
     <textarea id="state" spellcheck="false" placeholder="Paste or type what should be decided on: a message, a ticket, a log line, a JSON record&hellip;"></textarea>
+    <div class="picture" id="picture" hidden>
+      <img id="thumb" alt="" hidden>
+      <span class="about" id="pictureAbout"></span>
+      <button class="small" id="pick">Add Picture</button>
+      <button class="small" id="unpick" hidden>Remove</button>
+      <input type="file" id="pictureFile" accept="image/*" hidden>
+    </div>
     <div class="qhead">
       <h2>Questions</h2>
       <span class="row">
@@ -305,8 +313,68 @@ function buildRequest() {
   const text = $("state").value;
   let state = text;
   if (/^\s*[\[{]/.test(text)) { try { state = JSON.parse(text); } catch (_) { state = text; } }
-  return { state, questions: out, model: picker.name, max_len: picker.budget };
+  const request = { state, questions: out, model: picker.name, max_len: picker.budget };
+  // A picture goes with the questions, in front of them; with one, the state may be empty.
+  if (picture && sees()) { request.images = [picture.data]; if (!text.trim()) request.state = null; }
+  return request;
 }
+
+// ---- A picture to decide on ----
+// Shown for a model that reads pictures. The file goes to the board as it is when it is a
+// JPEG or PNG of a sensible size; anything larger, or in a format the board does not decode,
+// is redrawn here first, no more than 1536 pixels on its longer side. The board resizes it
+// again, to the at most 512 x 512 pixels the model reads.
+let picture = null;    // { data: a data URL, name, width, height, bytes }
+const sees = () => Boolean(picker.ready && picker.models[picker.name]?.images);
+
+function showPicture() {
+  $("picture").hidden = !sees();
+  $("thumb").hidden = $("unpick").hidden = !picture;
+  $("pick").textContent = picture ? "Change Picture" : "Add Picture";
+  if (picture) $("thumb").src = picture.data;
+  $("pictureAbout").replaceChildren(...(picture
+    ? [el("b", { textContent: picture.name }), `${picture.width} \u00d7 ${picture.height} pixels \u00b7 ${Math.round(picture.bytes / 1024)} kB sent \u00b7 the questions are asked about it`]
+    : [el("b", { textContent: "This model reads pictures" }), "Drop a picture here, paste one, or choose a file. The questions are then asked about it, with or without a state."]));
+}
+
+async function setPicture(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  let bitmap;
+  try { bitmap = await createImageBitmap(file); } catch (_) { $("error").hidden = false; $("error").textContent = "This browser could not read that picture."; return; }
+  const longer = Math.max(bitmap.width, bitmap.height);
+  const asItIs = ["image/jpeg", "image/png"].includes(file.type) && file.size <= 3 << 20 && longer <= 2048;
+  let data;
+  if (asItIs) {
+    data = await new Promise((done) => { const reader = new FileReader(); reader.onload = () => done(reader.result); reader.readAsDataURL(file); });
+  } else {
+    const scale = Math.min(1, 1536 / longer);
+    const canvas = Object.assign(document.createElement("canvas"), { width: Math.round(bitmap.width * scale), height: Math.round(bitmap.height * scale) });
+    const context = canvas.getContext("2d");
+    context.imageSmoothingQuality = "high";
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    data = canvas.toDataURL("image/jpeg", 0.92);
+  }
+  picture = { data, name: file.name || "Pasted Picture", width: bitmap.width, height: bitmap.height, bytes: Math.round((data.length - data.indexOf(",") - 1) * 3 / 4) };
+  showPicture();
+  decide();
+}
+
+function removePicture() {
+  if (!picture) return;
+  picture = null;
+  $("pictureFile").value = "";
+  showPicture();
+}
+$("pick").onclick = () => $("pictureFile").click();
+$("pictureFile").onchange = () => setPicture($("pictureFile").files[0]);
+$("unpick").onclick = () => { removePicture(); $("state").value.trim() ? decide() : clearResults("Add a picture or type a state, and the decision appears here."); };
+for (const kind of ["dragenter", "dragover"]) $("picture").addEventListener(kind, (event) => { event.preventDefault(); $("picture").classList.add("over"); });
+for (const kind of ["dragleave", "drop"]) $("picture").addEventListener(kind, (event) => { event.preventDefault(); $("picture").classList.remove("over"); });
+$("picture").addEventListener("drop", (event) => setPicture(event.dataTransfer.files[0]));
+document.addEventListener("paste", (event) => {
+  const file = sees() && [...(event.clipboardData?.files || [])].find((item) => item.type.startsWith("image/"));
+  if (file) { event.preventDefault(); setPicture(file); }
+});
 
 function changed() {
   if (!$("live").checked) return;
@@ -317,7 +385,7 @@ function changed() {
 async function decide() {
   const request = buildRequest();
   const mine = ++sequence;
-  if (!$("state").value.trim() || !Object.keys(request.questions).length) return;
+  if ((!$("state").value.trim() && !request.images) || !Object.keys(request.questions).length) return;
   if (!picker.ready) return;   // the model strip says why
   const started = performance.now();
   // Switching to a model that is not on the MLA yet takes a few seconds to load.
@@ -334,7 +402,9 @@ async function decide() {
   $("error").className = "error";
   if (mine !== sequence) return;  // a newer request superseded this one
   const roundTrip = performance.now() - started;
-  $("raw").textContent = JSON.stringify({ request, response: body }, null, 2);
+  // A picture is megabytes of base64: the JSON shown says only how much there was of it.
+  const shown = request.images ? { ...request, images: request.images.map((image) => `<a picture, ${Math.round(image.length / 1024)} kB of base64>`) } : request;
+  $("raw").textContent = JSON.stringify({ request: shown, response: body }, null, 2);
   $("error").hidden = !body.error;
   $("error").textContent = body.error || "";
   if (body.not_loaded) picker.lost();   // it was unloaded in the model manager
@@ -353,7 +423,9 @@ function renderLatency(usage, serverMs, roundTrip) {
     stat(usage.decisions, usage.decisions === 1 ? "decision" : "decisions"),
     stat(usage.latency_ms.toFixed(1) + " ms", "runtime total"),
     stat(usage.mla_ms.toFixed(1) + " ms", "MLA"),
-    stat(usage.tokenize_ms.toFixed(2) + " ms", "tokenizing"),
+    // With a picture, what reading it took (nothing, if the board had read it before).
+    usage.images ? stat(usage.vision_ms.toFixed(1) + " ms", usage.images_cached ? "vision: read before" : `vision \u00b7 ${usage.image_tokens} tokens`)
+                 : stat(usage.tokenize_ms.toFixed(2) + " ms", "tokenizing"),
     stat((usage.pre_ms + usage.post_ms).toFixed(2) + " ms", "CPU pre + post"),
     // Always eight tiles, so they sit in even rows; what was cut is said in the tokens tile.
     stat(usage.tokens + " / " + usage.max_len, usage.truncated ? `tokens used / budget, ${usage.state_tokens_dropped} cut from the state` : "tokens used / budget"),
@@ -407,6 +479,7 @@ function storeScenarios(list) {
 }
 
 function loadScenario(scenario, button) {
+  removePicture();                       // an example is about its own text
   $("state").value = scenario.state;
   questions = JSON.parse(JSON.stringify(scenario.questions)).map((q) => ({ options: [], ...q }));
   renderQuestions();
@@ -461,6 +534,7 @@ function clearResults(message) {
   $("clear").disabled = true;
 }
 function startBlank() {
+  removePicture();
   $("state").value = "";
   questions = [];
   renderQuestions();
@@ -480,13 +554,15 @@ $("save").onclick = () => {
 };
 // The page uses whichever model the model manager has loaded, and starts over when that changes.
 const picker = createModelPicker({ mount: $("picker"), onReady: (ready) => {
+  showPicture();
   if (!ready) return clearResults("No model is on the MLA. Load one in Settings.");
   const info = picker.models[picker.name];
   const chip = (text) => el("span", { className: "chip", textContent: text });
   $("chips").replaceChildren(
     chip(`graphs: ${info.loaded_seq_lens.join(", ")} tokens`),
     chip("weights " + (info.precision === "BF16" ? "bf16" : info.precision)),
-    chip("1 MLA ELF per graph, 0 CPU layers"));
+    chip(info.images ? "reads text and pictures" : "1 MLA ELF per graph, 0 CPU layers"));
+  showPicture();
   decide();
 } });
 picker.onBudget = changed;

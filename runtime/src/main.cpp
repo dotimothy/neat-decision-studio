@@ -5,6 +5,9 @@
 //   laya bench <model_dir> [--tokens N] [--iters N]         time the forward pass
 //   laya serve <model_dir>                                  one JSON request per stdin line
 //
+// A model directory with a d1_config.json holds one of LiquidAI's d1 models (d1-omni-600M or
+// d1-3B), which answer about pictures as well as text: `run`, `bench` and `serve` work on it.
+//
 // A model directory with a clm_config.json holds CLM instead (a Qwen3-8B encoder and two
 // projection heads): `run`, `bench` and `serve` work on it as they do on Laya, and `hidden`
 // dumps what the encoder embeds token sequences to.
@@ -20,6 +23,7 @@
 #include <fmt/format.h>
 
 #include "laya/clm.hpp"
+#include "laya/d1.hpp"
 #include "laya/runtime.hpp"
 
 namespace {
@@ -42,6 +46,11 @@ commands:
           (optional "seq_len" pins the graph; "max_len" and "head_max_len" set the token budget)
   hidden  diagnostic: dump the encoder hidden state from an encoder-only ELF
             --elf FILE --seq-len N --input FILE --out FILE
+
+a d1 model directory (one with d1_config.json) takes run, bench and serve as above, and
+reads pictures: run --image FILE[,FILE] puts them in front of the questions (the state may
+then be left out), a serve request carries them as "images" (base64 of a JPEG or PNG file
+each), and bench --image FILE times the vision tower on one (bench: --rows N --tokens T)
 
 a CLM model directory (one with clm_config.json) takes run, bench and serve as above
 (bench: --texts N times N texts of --tokens each, laid end to end in one pass), and
@@ -320,12 +329,119 @@ int clm_main(const Args& args) {
   throw std::invalid_argument("a CLM model directory takes run, bench, serve or hidden, not: " + args.command);
 }
 
+// -------------------------------------------------------------------------------------- d1
+
+// run: as for Laya, and --image FILE (several, separated by commas) puts pictures in front of
+// the questions; with pictures the state may be left out.
+int d1_run(d1::Runtime& runtime, const Args& args) {
+  if (args.has("state") && args.has("state-file")) throw std::invalid_argument("run takes one of --state and --state-file");
+  if (args.has("questions") == args.has("question"))
+    throw std::invalid_argument("run needs exactly one of --questions and --question");
+  d1::json images = d1::json::array();
+  std::stringstream files(args.get("image"));
+  for (std::string file; std::getline(files, file, ',');)
+    if (!file.empty()) images.push_back({{"path", file}});
+  if (images.empty() && !args.has("state") && !args.has("state-file"))
+    throw std::invalid_argument("run needs a state (--state, --state-file) or a picture (--image)");
+  d1::json state;
+  if (args.has("state") || args.has("state-file")) {
+    const json parsed = parse_state(args.has("state") ? args.get("state") : read_file(args.get("state-file")));
+    state = d1::json::parse(parsed.dump());
+  }
+  d1::json questions = d1::json::parse(args.has("questions") ? read_file(args.get("questions")) : args.get("question"));
+  if (questions.contains("type") && questions.at("type").is_string()) questions = d1::json{{"question", questions}};
+  std::cout << runtime.predict(state, questions, d1::pictures_of(images)).dump(2) << std::endl;
+  return 0;
+}
+
+// Time a pass: --rows N rows of --tokens T tokens laid end to end on one chain, and with
+// --image FILE the vision tower and projector on that picture.
+int d1_bench(d1::Runtime& runtime, const Args& args) {
+  const auto& cfg = runtime.config();
+  const uint32_t pinned = static_cast<uint32_t>(std::stoul(args.get("seq-len", "0")));
+  const uint32_t count = static_cast<uint32_t>(std::stoul(args.get("rows", "1")));
+  const uint32_t room = pinned ? pinned : runtime.max_tokens();
+  const uint32_t tokens = static_cast<uint32_t>(std::stoul(args.get("tokens", std::to_string(room / std::max(count, 1u)))));
+  const int iters = std::stoi(args.get("iters", "10"));
+  if (tokens < 4 || !count || size_t(tokens) * count > room)
+    throw std::invalid_argument("bench: the rows must fit the chain they are timed on");
+  d1::Row row;
+  row.type = "noul";
+  row.ids.assign(tokens, cfg.tokens.at("bos"));
+  row.markers = {1, 2};
+  const std::vector<const d1::Row*> rows(count, &row);
+  auto stats = [](std::vector<double> values) {
+    std::sort(values.begin(), values.end());
+    const double mean = std::accumulate(values.begin(), values.end(), 0.0) / values.size();
+    auto ms = [](double value) { return std::round(value * 1e3) / 1e3; };
+    return json{{"mean", ms(mean)}, {"p50", ms(values[values.size() / 2])}, {"min", ms(values.front())}, {"max", ms(values.back())}};
+  };
+  std::vector<double> mla, pre, vision;
+  uint32_t seq_len = 0;
+  for (int i = 0; i < iters + 1; ++i) {
+    d1::Cost cost;
+    runtime.pass(rows, {}, cost, pinned);
+    seq_len = cost.seq_len;
+    if (i < 1) continue;
+    mla.push_back(cost.mla_ms);
+    pre.push_back(cost.pre_ms);
+  }
+  json report{{"rows", count}, {"tokens_each", tokens}, {"seq_len", seq_len}, {"loaded_seq_lens", runtime.seq_lens()},
+              {"iters", iters}, {"precision", cfg.precision}, {"mla_ms", stats(mla)}, {"pre_ms", stats(pre)}};
+  if (args.has("image")) {
+    d1::Picture picture = d1::pictures_of(d1::json::array({{{"path", args.get("image")}}})).front();
+    std::vector<double> prepare;
+    size_t positions = 0;
+    for (int i = 0; i < iters + 1; ++i) {
+      d1::Cost cost;
+      picture.rgb[0] ^= 1;   // a picture seen before costs nothing: make it a new one each time
+      positions = runtime.see(picture, cost).size() / cfg.hidden_size;
+      if (i < 1) continue;
+      vision.push_back(cost.vision_ms);
+      prepare.push_back(cost.pre_ms);
+    }
+    report["image"] = {{"width", picture.width}, {"height", picture.height}, {"positions", positions},
+                       {"vision_ms", stats(vision)}, {"pre_ms", stats(prepare)}};
+  }
+  std::cout << report.dump(2) << std::endl;
+  return 0;
+}
+
+int d1_serve(d1::Runtime& runtime) {
+  runtime.warm_up();
+  std::cout << json{{"ready", true}, {"seq_lens", runtime.seq_lens()}, {"images", runtime.sees()}}.dump() << std::endl;
+  for (std::string line; std::getline(std::cin, line);) {
+    if (line.find_first_not_of(" \t\r") == std::string::npos) continue;
+    d1::json response;
+    try {
+      const d1::json request = d1::json::parse(line);
+      const d1::json none;
+      response = runtime.predict(request.contains("state") ? request.at("state") : none, request.at("questions"),
+                                 d1::pictures_of(request.contains("images") ? request.at("images") : none));
+      if (request.contains("id")) response["id"] = request.at("id");
+    } catch (const std::exception& error) {
+      response = {{"error", error.what()}};
+    }
+    std::cout << response.dump() << std::endl;
+  }
+  return 0;
+}
+
+int d1_main(const Args& args) {
+  d1::Runtime runtime(args.model_dir, parse_list(args.get("seq-lens")));
+  if (args.command == "run") return d1_run(runtime, args);
+  if (args.command == "bench") return d1_bench(runtime, args);
+  if (args.command == "serve") return d1_serve(runtime);
+  throw std::invalid_argument("a d1 model directory takes run, bench or serve, not: " + args.command);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
     const Args args = parse_args(argc, argv);
     if (std::filesystem::exists(std::filesystem::path(args.model_dir) / "clm_config.json")) return clm_main(args);
+    if (std::filesystem::exists(std::filesystem::path(args.model_dir) / "d1_config.json")) return d1_main(args);
     laya::Runtime runtime(args.model_dir, parse_list(args.get("seq-lens")));
     if (args.command == "run") return cmd_run(runtime, args);
     if (args.command == "raw") return cmd_raw(runtime, args);

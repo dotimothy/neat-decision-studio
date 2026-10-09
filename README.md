@@ -33,7 +33,7 @@ downloads them from, and the Build section regenerates them.
 Everything below was recorded from the web app running on a Modalix DevKit, at the speed it
 runs. Each page shows the time the MLA took for the decisions on screen.
 
-**The landing page and the showcase.** The first screen is a question box and four ways in;
+**The landing page and the showcase.** The first screen is a question box and six ways in;
 the showcase is the story as slides, with a decision made live on the board.
 
 <table>
@@ -54,6 +54,16 @@ Here four models answer: three Layas and CLM, a decision model on an 8-billion-p
 encoder.
 
 ![Compare: one question after another, each answered by four models side by side](docs/compare.gif)
+
+**Vision** is for the models that read pictures: a set of pictures, the questions asked of
+every one of them, each model's answers beside what a person would say, and the count of how
+often each was right; or a camera or a video, decided frame after frame.
+
+![Vision: two example sets answered by d1 Omni and d1 3B side by side and scored, then a video decided frame by frame](docs/vision.gif)
+
+In the recording the two models answer the Warehouse Floor and the Animals sets, and then d1
+Omni decides a video frame by frame; the video there is the Animals pictures shown one after
+another.
 
 **Games.** In each game a model makes every decision, and the page shows what it was told
 and how it chose. Any loaded model can take a seat, so two different models play each other.
@@ -122,8 +132,8 @@ compiled models are downloaded from Hugging Face by the app.
 ```bash
 ssh sima@<board-ip>
 cd /media/nvme
-git clone https://github.com/dotimothy/neat-decision-studio.git laya
-cd laya
+git clone https://github.com/dotimothy/neat-decision-studio.git
+cd neat-decision-studio
 ./setup.sh            # checks the prerequisites, builds the runtime, adds the shortcuts
 ./run.sh              # serves the demo at http://<board-ip>:8095 (afterwards also: neat-decision)
 ```
@@ -154,16 +164,46 @@ Then, in a browser on any machine that can reach the board:
 4. Open **Debate**, **Questions** or **Games**.
 
 A clone is also the app directory: the built runtime, the downloaded models (`model/`,
-`model-<name>/`) and the log stay out of git.
+`model-<name>/`) and the log stay out of git. Nothing in the app depends on the folder's name
+or place (everything is found from where `run.sh` is), so it can be cloned elsewhere or moved;
+after a move, run `./setup.sh` again so the `neat-decision` alias and the desktop icon point at
+the new place.
+
+**Keeping the models somewhere else**
+
+The models are the large part (the general model is 3 GB, CLM 15 GB) and by default they sit
+in the app directory, as `model/` and `model-<name>/`. `LAYA_MODELS_DIR` names another
+directory for them: models are read from it, downloaded to it and deleted in it, and the app
+directory keeps only the source, the runtime and the log.
+
+```bash
+./setup.sh --models-dir /media/nvme/models     # or LAYA_MODELS_DIR=/media/nvme/models ./setup.sh
+```
+
+Given to `setup.sh`, it is remembered (in `.models-dir`, which an update leaves alone), so
+`run.sh`, the `neat-decision` alias and the desktop icon use it from then on;
+`./setup.sh --models-dir default` goes back to the app directory. For one run only,
+`./run.sh --models-dir DIR` or `LAYA_MODELS_DIR=DIR ./run.sh`; what is asked for on the command
+line wins over the variable, and the variable over what was remembered. Models already in the
+app directory are not moved: `setup.sh` names them and the `mv` that brings them along. From a
+host, `bin/laya-deploy --models-dir DIR` copies the models to that directory on the board and
+has the board remember it. Settings, under **Add Model**, shows the directory in use and the
+space free in it. `LAYA_MODEL_DIR` and `LAYA_GAME_MODEL_DIR` still point the general and the
+game model at directories of their own.
 
 **Without git on the board, or from a development host**
 
 ```bash
 git clone https://github.com/dotimothy/neat-decision-studio.git && cd neat-decision-studio
 bin/laya-deploy --board sima@<board-ip>      # copies the runtime and web app to
-                                             # /media/nvme/laya and runs setup.sh there
-ssh sima@<board-ip> /media/nvme/laya/run.sh
+                                             # /media/nvme/neat-decision-studio and runs setup.sh there
+ssh sima@<board-ip> /media/nvme/neat-decision-studio/run.sh
 ```
+
+`--remote DIR` (or `LAYA_REMOTE_DIR`) puts it somewhere else. A board set up before the
+folder was renamed has the app in `/media/nvme/laya`: `bin/laya-deploy` finds it and keeps
+using it, so the models there are not downloaded twice. To rename such an installation, stop
+the app, `mv /media/nvme/laya /media/nvme/neat-decision-studio`, and run `./setup.sh` in it.
 
 Given a build directory, `bin/laya-deploy` also copies models you compiled yourself; see
 [Build](#build).
@@ -242,6 +282,19 @@ laya [general-int8] · state ▸ /bench 100
 first, and questions piped in are answered one per line. The prompt is `webapp/cli.py`, which
 uses only the app's HTTP API and Python's standard library.
 
+Anything the prompt waits on is drawn as one live line, taken from NEAT GenAI Studio's
+terminal chat: a spinner whose colour drifts through the Neat palette, the time waited so far,
+and, where there is progress to report (a model loading, a download, `/bench`), a bar that
+runs teal to lime with a glint travelling along it and moves in eighths of a cell.
+
+```text
+  ⠸ █████████▍░░░░░░░░░░░░░░  38%  Loading the 128-token graph, part 2 of 18  14s
+  ⠦ asking every loaded model…  1s
+```
+
+The app starting, an answer, `/compare` and `/reset` have the spinner and the timer. Output
+that is not a terminal (a pipe, a log) gets none of it, and `NO_COLOR` draws it without colour.
+
 To update, `git pull` (or run `bin/laya-deploy` again), then `./setup.sh`, and restart the app.
 If a model fails to load with `MLA_LOAD_FAILED`, see the end of
 [Run on the board](#run-on-the-board).
@@ -309,8 +362,13 @@ laya_sima/            compiler package (runs in the Model Compiler venv)
   cli.py              laya-compile
 clm_sima/             the same for CLM's encoder: Qwen3 layers as a chain of graphs
   config.py, weights.py, model.py, cli.py (clm-compile)
+d1_sima/              the same for LiquidAI's d1 models: an LFM2 trunk, bidirectional (d1-omni)
+                      or causal (d1-3B), and a SigLIP2 vision tower
+  config.py, weights.py, model.py, cli.py (d1-compile)
+  hostio.py, lmio.py  the CPU side for d1-omni and for d1-3B, in numpy
 bin/laya-compile      wrapper that runs the CLI under the Model Compiler venv
 bin/clm-compile       the same wrapper for clm_sima
+bin/d1-compile        and for d1_sima
 bin/laya-deploy       copy models + runtime + web app to a board and set it up
 runtime/              C++ runtime and `laya` CLI for the board
 webapp/               example web app (stdlib Python server; question, games and model pages),
@@ -318,6 +376,7 @@ webapp/               example web app (stdlib Python server; question, games and
   static/neat.css      the look shared by every page; brand.js builds the header, the footer
                        and the game switcher
   static/vendor/       chess.js 0.10.3, the rules of chess (Jeff Hlywa, BSD-2-Clause)
+  static/chess-engine.js  a traditional chess engine to play the models: alpha-beta search
   static/brand/, fonts/ marks and fonts taken from SiMa.ai's NEAT GenAI Studio example
 games/                per game: what the model is asked and why, and the reference policy
 setup.sh, run.sh      board-side: build once, start the app, update it
@@ -325,7 +384,9 @@ docs/                 the recordings of the demo shown above
 tools/                reference dump, ONNX check, board parity, agreement, I/O shape probe,
                       game-head training, and per game a board check and a simulation,
                       publish_hub.py, which uploads compiled models to Hugging Face, and for
-                      CLM: clm_reference.py, clm_heads.py, clm_verify_onnx.py, clm_check.py
+                      CLM: clm_reference.py, clm_heads.py, clm_verify_onnx.py, clm_check.py;
+                      for d1: d1_reference.py, d1_lm_reference.py, d1_verify_onnx.py,
+                      d1_lm_verify_onnx.py, d1_check.py
 ```
 
 `models/`, `build/`, `.venv-ref/`, `.venv-train/` and `third_party/` are local and ignored by
@@ -378,7 +439,7 @@ bin/laya-compile models/laya -o build/laya --seq_lens 128,256
 #    with llima-compile
 
 # 3. Copy the models, runtime and web app to the board and build the runtime there
-#    (-> /media/nvme/laya)
+#    (-> /media/nvme/neat-decision-studio)
 bin/laya-deploy build/laya --game build/laya-dino \
     --extra multilingual=build/laya-multilingual --board sima@<board-ip>
 ```
@@ -417,11 +478,26 @@ would not understand.
 ## Run on the board
 
 ```bash
-cd /media/nvme/laya
+cd /media/nvme/neat-decision-studio
 ./setup.sh            # once: checks prerequisites, builds the runtime (add --check to test the MLA)
 ./run.sh              # http://<board-ip>:8095
 ./run.sh --stop
 ```
+
+**HTTPS.** The app serves HTTPS and HTTP on the same port. A browser gives a page the camera
+only in a secure context, which over a network means HTTPS, and the Vision page's live camera
+needs that. So a page asked for over plain HTTP from another machine is sent to
+`https://<board-ip>:8095`, and everything else is left alone: the board's own browser at
+`http://localhost:8095` (a page from localhost is trusted with a camera as it is), and every
+program that speaks plain HTTP to the API (`curl`, the terminal prompt, the tools).
+
+The certificate is one the app makes itself the first time it starts, with `openssl`:
+self-signed, for the board's host name and addresses, kept in `.tls/` beside the app (an update
+leaves it alone; delete the directory to have a new one made). A browser cannot know such a
+certificate, so the first visit shows its warning, "Your connection is not private": choose
+Advanced, then Proceed, once for each browser. `./run.sh --cert FILE --key FILE` serves a
+certificate of your own instead, and `./run.sh --no-https` serves HTTP alone, as before.
+With `curl`, `https://` needs `-k` for the self-signed certificate; `http://` works as it did.
 
 The app is **Neat Decision Studio** ("running on SiMa.ai Palette Neat", says its header) and follows
 the look of SiMa.ai's NEAT GenAI Studio example (`webapp/static/neat.css`, light and dark with
@@ -434,16 +510,27 @@ header also has a full-screen button, for showing the demo on a display; changin
 full screen (a browser only enters it on a click or a key), and the next click or key on the
 new page takes it up again.
 
+Beside it is a **dark mode** button: a moon while dark mode is off, a sun while it is on. The
+pages follow the system's setting until it is pressed; after that the choice is kept in the
+browser and every page opens with it. The styles are written once, for the system's setting
+(`@media (prefers-color-scheme: dark)`), and `theme.js` puts a choice into force by rewriting
+those rules' conditions where they stand, so nothing is styled twice.
+
 The app opens on a plain **landing page** (`/`), in the manner of Neat GenAI Studio's first
 screen: the logo, the name, one line on what this is, a box for a yes-or-no question (which opens Debate
-with it), four example questions, and the four ways in. The longer story is the **showcase**
+with it), four example questions, and the six ways in. The longer story is the **showcase**
 (`/showcase`, the screen icon in the header): a deck of eight slides in the format of Neat
 GenAI Studio's showcase, moved through with the arrow keys, the dots or a slideshow that
 advances by itself. Its first slide makes a decision on the board every few seconds (a support
 message routed to a department or read for its tone, with the time the MLA took), and its
-fourth lists the models with their measured latency and where each one is.
+fourth lists the models with their measured latency and where each one is. While the
+slideshow plays, its button is a timer in the Neat colours, the live status line of the
+Studio's terminal put on a button: a spinner whose colour drifts through the palette, the
+seconds the slide has been up, and along the bottom a bar in the spectrum, with a glint
+travelling along it, that runs the length of a slide's stay and starts again with each slide.
+A slide shown by hand gets its full stay too, and a tab nobody is looking at does not advance.
 
-Behind it are four areas:
+Behind it are five areas:
 
 - **Debate** (`/debate`): type a yes-or-no question and the model answers it by itself,
   with exactly two options, on every change to the text (a decision every 25-40 ms). A pie
@@ -455,6 +542,24 @@ Behind it are four areas:
 - **Questions** (`/questions`): type a state, add `choice` / `score` / yes-no questions, and
   see the decision and its latency. It opens blank; examples are one click away, and scenarios
   can be saved in the browser.
+- **Vision** (`/vision`): the harness for the models that read pictures (d1 Omni and d1 3B).
+  A **test set** is a strip of pictures and a list of questions; every picture is asked every
+  question of every chosen model, one model after another so that each is timed alone, and the
+  answers are set side by side in a table, a picture a row and a model a column. Beside each
+  picture is what a person would answer (**Should Be**), and each model is counted against
+  it: so many of so many right for the question in focus, and over all questions. Five example
+  sets come with the app (shelves to restock, a warehouse floor, a road, wildfire smoke,
+  animals), twenty photographs from Wikimedia Commons that are in the public domain
+  (`webapp/static/samples/SOURCES.md`), labelled by hand; pictures of your own are dropped,
+  pasted or chosen, and labelled in the table. The picture on the stage says what size it is
+  read at and as how many positions, and what each model answered. **Live** decides a camera
+  or a video file frame after frame, as fast as the board answers, with the answer over the
+  video and a line of the last frames' answers under it (about four frames a second with d1
+  Omni and three questions; under one with d1 3B beside it); **Keep Frame** puts what is on
+  screen into the test set. (A browser gives a page its camera only over HTTPS or on the machine
+  itself, which is why the app serves HTTPS: see [Run on the board](#run-on-the-board).) On the
+  example sets, 48 labelled answers, d1 3B agrees with the person on 45 and d1 Omni on 37, at
+  about 1 s and 0.2 s a picture for three questions.
 - **Games** (`/games`): Snake, which the tab opens on, Chess, Tic-Tac-Toe, Rock Paper Scissors,
   Dino Arena, Blackjack and Sudoku, below. A person can join every one of them, any two
   loaded models can play each other in every one of them, and three can be played against a
@@ -784,6 +889,127 @@ questions, but it splits a snake move 55/45 and prefers a rook move to the mate 
 `laya-chess` is trained to see. Its makers' strong results are from heads fine-tuned for a
 task, which is cheap (only the heads train) and is not done here.
 
+## d1: decision models that read pictures
+
+[Open d1](https://huggingface.co/blog/LiquidAI/open-d1) (LiquidAI) is two decision models
+that answer the same three kinds of question as Laya, about a text or about a picture:
+[d1-omni-600M](https://huggingface.co/LiquidAI/d1-omni-600M) and
+[d1-3B](https://huggingface.co/LiquidAI/d1-3B). Both are compiled here the way CLM is, with
+LLiMa's graph builder, int8 weights and bfloat16 activations (`d1_sima`, `bin/d1-compile`),
+and both run in the app beside the other models: a question to one of them may carry
+pictures.
+
+> **Licence.** The d1 checkpoints are under the LFM Open License v1.0, not Apache-2.0: free
+> for research and for organisations under 10 million dollars of annual revenue, and
+> commercial use above that needs a licence from Liquid AI. The licence is copied into a
+> compiled model's directory. Nothing of LiquidAI's code is in this repository; the
+> reference tools load it from the checkpoint. The compiled d1 models are not published on
+> this repository's Hugging Face page.
+
+**d1-omni-600M** is an LFM2 trunk of 16 layers (ten short convolutions, six of grouped-query
+attention) read in both directions, a decision head of two transformer layers, and a SigLIP2
+vision tower. A question is one row of tokens, with a marker in front of each option,
+
+    <bos> <state> state <q> instructions <opt> <mask> option_0 </opt> <opt> <mask> option_1 </opt> ... <decide>
+
+and the answer is the softmax over the head's scores at the markers. The trunk and the head
+are one MLA graph a sequence length (128 and 512 tokens), 0.4 to 0.6 GB each; the vision tower
+is one graph for up to 1024 patches (a 512 x 512 picture's) and its projector another. A
+picture is resized to at most 512 x 512, cut into 16-pixel patches, read by the tower, merged
+2 x 2 and projected into at most 256 embeddings that go in front of the row.
+
+As for CLM, the masks are inputs of the graph, so that one pass reads several rows laid end to
+end. Here there are two kinds of mask, because the trunk knows a token's place in two ways:
+through RoPE in attention, which depends only on how far apart two tokens are, and through a
+three-tap convolution, which reads a token's two neighbours. An attention mask keeps a row to
+itself, and two more cut the convolution's taps at a row's two ends (and between a picture's
+embeddings and the text after them, which the picture must not read). Rows then come out as
+they would alone: `tools/d1_verify_onnx.py` asks every reference question through the ONNX
+graphs both ways and the two agree to the last digit.
+
+Two things about the MLA compiler were found on the way and are handled in `d1_sima`: it takes
+no graph input of one channel (the convolution's masks are therefore as wide as the hidden
+state), and a compiled graph takes its inputs in the order it first uses them, not the order
+they were declared in, so `d1-compile` reads that order from the compiled package and writes
+it into the model's config for the runtime to follow.
+
+**d1-3B** is LFM2.5-VL-3B as it is, a causal language model of 30 layers, and it is asked as
+one: a question is a chat turn that stops where the answer would begin, and the answer is
+read off the logits of the next token, a softmax over the tokens that spell the options
+(`yes` and `no`, a digit, a letter) and nothing else. Nothing is generated. The logits are
+the final hidden state against rows of the embedding table, so the runtime computes only the
+options' rows, on the CPU. The 30 layers are a chain of eight graphs a sequence length; the
+masks are the causal ones, with the two taps that look back cut at a row's start.
+
+```bash
+# on the host, in the SDK container
+.venv-ref/bin/python tools/d1_reference.py                      # PyTorch answers to check against
+bin/d1-compile models/d1-omni-600m -o build/d1-omni             # about 35 minutes
+bin/d1-compile models/d1-3b -o build/d1-3b --layers_per_graph 4    # hours in one run: --graphs
+                                                                   # builds part of the chain, so
+                                                                   # several runs can share it
+bin/laya-deploy --extra d1=build/d1-omni --extra d1-3b=build/d1-3b --board sima@<board-ip>
+python3 tools/d1_check.py                                       # the board against PyTorch
+```
+
+**Asking about a picture.** The Vision page is made for it: sets of pictures, the questions
+asked of each, the models side by side and scored, or a live video (see [The demo](#the-demo)).
+On the Questions page a model that reads pictures also shows a place for one under the state: drop a picture there, paste one, or choose a file, and the questions
+are asked about it, with a state or without. Over HTTP it is the `images` of a request:
+
+```bash
+curl -s http://<board-ip>:8095/api/predict -H 'Content-Type: application/json' -d '{
+  "model": "d1", "state": null,
+  "images": ["'"$(base64 -w0 photo.jpg)"'"],
+  "questions": {"cat": {"type": "noul", "instructions": "Is there a cat in the picture?"}}}'
+```
+
+Each of `images` is the base64 of a JPEG or PNG file (a data URL is taken too), up to four of
+them; `/api/compare` takes `images` as well and asks the models that read pictures. In the
+terminal, `/image FILE` attaches a picture to the questions that follow. The board decodes the
+file with OpenCV and does the rest itself; a picture it has just read is remembered, so more
+questions about it cost only the trunk. A picture larger than about 720 x 720 pixels, which
+LiquidAI's own code would cut into tiles and read at up to 2800 positions, is read here as one
+picture of at most 256.
+
+**Measured on the board (d1-omni-600M)**, against the PyTorch model in fp32 on the same
+questions and pictures (`tools/d1_check.py`):
+
+| | |
+|---|---|
+| a text question, 128-token graph | 10 ms on the MLA, 11 ms in all |
+| a picture: tower and projector | 48 ms |
+| a question about a picture, 512-token graph | 33 ms; about 100 ms in all with a new picture |
+| decisions the same as PyTorch's | 26 of 27 (13 of 13 on text, 13 of 14 on pictures) |
+| largest difference in a probability, where the decision is the same | 0.15 |
+| on the MLA | 1.4 GB: two trunks, the tower, the projector |
+
+**Measured on the board (d1-3B)**, the same way (`tools/d1_check.py --reference
+build/d1_3b_reference --model-dir model-d1-3b`):
+
+| | |
+|---|---|
+| a pass, 128-token chain (8 graphs) | 91 ms |
+| a pass, 512-token chain | 310 ms; three questions about one text go in one pass |
+| a picture: tower and projector | 189 ms |
+| a question about a picture | 310 ms; about 500 ms in all with a new picture |
+| decisions the same as PyTorch's | 27 of 27 (13 on text, 14 on pictures) |
+| largest difference in a probability | 0.046 |
+| on the MLA | 5.3 GB as the app loads it: the 512-token chain (3.6 GB) and the tower (1.7 GB); the 128-token chain is another 2.9 GB |
+
+d1-3B is the more careful reader: it says the drawn red circle is there with 99%, counts two
+shapes and two cats, and knows which lamp of a traffic light is lit, where d1-omni does not.
+It costs for it: about nine times d1-omni's time for a text question, and five times for a
+picture. `tools/d1_check.py --via-app d1-3b` asks the app's loaded model over HTTP, so that
+checking a model this size does not load a second copy of it. Its projector's first layer is
+4608 channels wide, more than the MLA takes as one input, so it is cut into the four patches
+of a merged block, each an input.
+
+About d1-omni: the one decision that differs is a drawn red circle, which PyTorch says is not there with 62%
+and the board says is there with 98%; the board is the one that is right, by luck of rounding.
+d1-omni is an early research release and unsure of drawn shapes; of photographs it is not.
+It also hears (a FastConformer encoder for 30 seconds of speech), which is not compiled here.
+
 ## Playing against a person, another model, or a language model
 
 Every game has a seat for somebody else. A person can take it, and so can **any other loaded
@@ -792,12 +1018,43 @@ one entry per model on the MLA (load more in Settings).
 
 | game | the other seat | a person | another model |
 |---|---|---|---|
-| Chess, Tic-Tac-Toe | either side, **White**/**Black** or **X**/**O** | click the board | plays its side by the same question |
+| Chess, Tic-Tac-Toe | either side, **White**/**Black** or **X**/**O** | click the board | plays its side by the same question (or **Alpha-Beta** / **Minimax**, below) |
 | Rock Paper Scissors | **Against** | you throw (buttons, or R, P, S); the model has decided before you do | each reads the other's throws |
 | Snake | **Against ...**, then **Start Race** (or Space) | your own board, steered with the arrow keys | its own snake on the same course; they race again when both are done |
 | Dino Arena | **Against ...**, then **Start Race** (or Space) | your own lane on the same course | its own lane; they race again when both have crashed |
 | Blackjack | **Second Seat** | your own hand from the same deck, against the same dealer | its own hand, at a flat bet of 1 |
 | Sudoku | **Players** | You and the model, a cell each in turn | **Two Models, in Turns** |
+
+**A traditional opponent.** Chess and Tic-Tac-Toe also seat a player that is not a model at
+all, the classical way to play a game: look ahead, and assume the other side plays its best.
+
+- **Alpha-Beta** (Chess, `webapp/static/chess-engine.js`) scores a position by counting, what
+  the pieces are worth and where they stand, and chooses by minimax with alpha-beta pruning,
+  which drops a move as soon as it is known to be worse than one already found. Around that
+  are the usual helpers: it looks one ply deeper at a time and tries the last depth's best
+  move first, tries captures of the biggest piece by the smallest before other moves, and at
+  the end of the look-ahead plays the captures out before it scores. It runs in JavaScript in
+  the browser, in a worker, on chess.js's rules, which gives it three to five thousand
+  positions a second: three plies deep (the default; one to four can be chosen) is about a
+  second a move, the pace of a Laya move. Nothing of it touches the MLA, which is the point
+  of the comparison. With it seated the page has a panel that lays its search out, as the
+  model's panel lays out a decision: the positions searched, branches pruned and positions a
+  second; the line it expects; what each depth of the deepening found; every first move it
+  weighed in the order it tried them, with its score or only the most it could be worth and
+  the positions spent on it, which is where the pruning shows (the first move searched in
+  full, the rest cut short for a fraction of the work); the sum its judgement comes to,
+  material and placement for each side; and its method, step by step, with what it lacks. A first
+  try on the board, too short to be a result: at three plies, as Black, it won both games
+  that were finished against Laya-chess, taking 1.9 s a move to Laya-chess's 1.3 s.
+- **Minimax** (Tic-Tac-Toe) searches the whole game, which is small enough for that, so it
+  never loses. A model that draws every game against it is playing the game right.
+
+The **language model**'s panel says as much about how it is played with: what it was sent
+for its last move, word for word (the standing instruction and the position with the legal
+moves), what it answered, how a move was read out of the answer for that game, how many
+replies named no legal move, the tokens and time a reply took, and its method: a general
+chat model with no memory between moves and no look-ahead, asked at temperature 0.2 with
+its thinking mode off.
 
 The model named at the top of the page is the page's own: its decisions fill the panel on
 the right and the latency figures. The other model is asked exactly the same questions and
@@ -1008,6 +1265,12 @@ trained on. The code is in place but has never been run to completion.
 - CLM is compiled for 128 tokens only (each further length is another 7.25 GB on the MLA); a
   longer text keeps its last 128 tokens. Its int8 weights make it an approximation of the
   PyTorch model (see its section), most of all for one-token options.
+- d1 reads a picture as one crop of at most 512 x 512 pixels (256 positions). LiquidAI's code
+  cuts a larger picture into up to ten tiles and a thumbnail; that is not ported, so fine
+  detail in a large picture is lost here. d1-omni's audio encoder is not compiled. Both d1
+  models are compiled for 128 and 512 tokens, and a state that does not fit is cut at its
+  end. On d1-3B a choice has at most 26 options. The compiled d1 models are not on this
+  repository's Hugging Face page (see their licence in the d1 section).
 - Not ported from upstream: `option_order`, long-document windowing (`predict_long`), hooks,
   `min_confidence` abstention and per-language temperatures.
 - The shipped checkpoints' act heads saturate (act probability is 1.0 on everything tried, in
@@ -1018,12 +1281,16 @@ trained on. The code is in place but has never been run to completion.
 Apache-2.0; see [LICENSE](LICENSE). That covers the code in this repository only. The SiMa
 Model Compiler and the LLiMa libraries it builds on are SiMa.ai's and are licensed separately;
 the Laya checkpoints are upstream's, and so are CLM's heads (Contrastive-LM, Apache-2.0) and
-Qwen3-8B (Alibaba Cloud, Apache-2.0), neither of which is in the repository.
+Qwen3-8B (Alibaba Cloud, Apache-2.0), neither of which is in the repository. LiquidAI's d1
+checkpoints are under the LFM Open License v1.0, which is not Apache-2.0: it limits
+commercial use to organisations under 10 million dollars of annual revenue. They are not in
+the repository either, nor is any of LiquidAI's code; `d1_sima` and the d1 runtime are written
+here from the models' published description of themselves.
 
 `webapp/static/vendor/chess.js` is chess.js 0.10.3 by Jeff Hlywa, BSD-2-Clause; its notice is at
 the top of the file.
 
-The four emoji on the landing page (`webapp/static/brand/emoji-*.svg`) are images from Google's
+The six emoji on the landing page (`webapp/static/brand/emoji-*.svg`) are images from Google's
 Noto Emoji (v2.047, Apache-2.0), used as pictures because the board has no emoji font.
 
 The NEAT mark, the SiMa.ai logos and the Inter and JetBrains Mono fonts under

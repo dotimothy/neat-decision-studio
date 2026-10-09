@@ -6,6 +6,7 @@
 <link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
 <title>Neat Decision Studio</title>
 <link rel="stylesheet" href="/static/neat.css">
+<script src="/static/theme.js"></script>
 <style>
   /* The first screen: what this is in a line, a question to ask, and the four ways in. The
      longer story is the showcase (/showcase). Colours, fonts and the header come from neat.css. */
@@ -38,7 +39,7 @@
   .chips a { text-decoration: none; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
              padding: 6px 14px; font-size: 13.5px; transition: .16s ease; }
   .chips a:hover { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
-  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; width: 100%; margin-top: 34px; text-align: left; }
+  .tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; width: 100%; margin-top: 34px; text-align: left; }
   .tile { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm);
           padding: 16px; text-decoration: none; color: var(--ink); transition: .16s ease; }
   .tile:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); transform: translateY(-2px); box-shadow: var(--shadow-md); }
@@ -71,8 +72,10 @@
   <div class="tiles" data-min="170">
     <a class="tile" href="/debate"><img class="emoji" src="/static/brand/emoji-debate.svg" alt=""><h3>Debate</h3><p>Yes or No, Answered as You Type</p></a>
     <a class="tile" href="/questions"><img class="emoji" src="/static/brand/emoji-questions.svg" alt=""><h3>Questions</h3><p>Your Own Text, Questions and Options</p></a>
+    <a class="tile" href="/vision"><img class="emoji" src="/static/brand/emoji-vision.svg" alt=""><h3>Vision</h3><p>Pictures and Live Video, Decided</p></a>
     <a class="tile" href="/compare"><img class="emoji" src="/static/brand/emoji-compare.svg" alt=""><h3>Compare</h3><p>One Question, Every Loaded Model</p></a>
     <a class="tile" href="/games"><img class="emoji" src="/static/brand/emoji-games.svg" alt=""><h3>Games</h3><p>Seven Games It Plays, With You in Them</p></a>
+    <a class="tile" href="/models"><img class="emoji" src="/static/brand/emoji-models.svg" alt=""><h3>Models</h3><p>Download, Load and Unload Them</p></a>
   </div>
   <div class="status"><span><i id="dot"></i><span id="model">&nbsp;</span></span><a class="go" href="/showcase">See the Showcase</a></div>
 </main>

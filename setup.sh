@@ -7,6 +7,10 @@
 #   ./setup.sh --check            also load the general model on the MLA and answer one question
 #   ./setup.sh --runtime-only     check the prerequisites and build the runtime, nothing else
 #                                 (what `./run.sh update` runs)
+#   ./setup.sh --models-dir DIR   keep the models in DIR and not in this directory (or
+#                                 LAYA_MODELS_DIR=DIR). It is remembered, in .models-dir, so
+#                                 run.sh, the alias and the desktop icon use it from then on;
+#                                 `--models-dir default` goes back to this directory.
 #   ./setup.sh --no-alias         leave the shell's startup file alone      (or CREATE_ALIAS=0)
 #   ./setup.sh --no-desktop-icon  install no desktop icon            (or CREATE_DESKTOP_ICON=0)
 #
@@ -16,16 +20,18 @@
 #                 setup offers the list; otherwise models are downloaded later, on the app's
 #                 Models page or with `neat-decision --cli`.
 #   LAYA_HUB      the Hugging Face repository they come from (default: TDoSiMa/sima-laya)
+#   LAYA_MODELS_DIR   the directory the models are in, `model/` and `model-<name>/`; the same
+#                 as --models-dir
 #
 # `neat-decision` is an alias for run.sh (`neat-decision`, `neat-decision --cli`, `neat-decision --stop`). The
 # desktop icon, installed when the board has a desktop, starts the app and opens it in the
 # board's browser.
 #
 # Run it on the board, in a clone of the repository or in the directory `bin/laya-deploy`
-# copied (default /media/nvme/laya).
+# copied (default /media/nvme/neat-decision-studio).
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODEL_DIR="${LAYA_MODEL_DIR:-${APP_DIR}/model}"
+models_dir="${LAYA_MODELS_DIR:-}"      # asked for now; else what was remembered; else this directory
 HUB="${LAYA_HUB:-TDoSiMa/sima-laya}"
 check=0
 runtime_only=0
@@ -71,16 +77,37 @@ section() {
   printf '\n%s\n   %s%s%s\n' "${line}" "${C_BOLD}" "$1" "${C_RESET}"
 }
 
-for arg in "$@"; do
-  case "$arg" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --check) check=1 ;;
     --runtime-only) runtime_only=1 ;;
     --no-alias) alias=0 ;;
     --no-desktop-icon) icon=0 ;;
-    -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) printf '%s\n' "setup.sh: unknown option: $arg (see --help)" >&2; exit 2 ;;
+    --models-dir) models_dir="${2:?--models-dir needs a directory, or default}"; shift ;;
+    --models-dir=*) models_dir="${1#--models-dir=}" ;;
+    -h|--help) sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) printf '%s\n' "setup.sh: unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
+  shift
 done
+
+# Where the models are. One asked for here is remembered in .models-dir, which run.sh reads:
+# the alias and the desktop icon start run.sh with nothing to tell it.
+if [[ "$models_dir" == "default" || "$models_dir" == "$APP_DIR" || "$models_dir" == "$APP_DIR/" ]]; then
+  rm -f "${APP_DIR}/.models-dir"
+  MODELS_DIR="$APP_DIR"
+elif [[ -n "$models_dir" ]]; then
+  mkdir -p "$models_dir" 2> /dev/null && [[ -w "$models_dir" ]] \
+    || { printf '%s\n' "setup.sh: the models directory $models_dir cannot be made or written to" >&2; exit 2; }
+  MODELS_DIR="$(cd "$models_dir" && pwd)"
+  printf '%s\n' "$MODELS_DIR" > "${APP_DIR}/.models-dir"
+else
+  MODELS_DIR=""
+  if [[ -s "${APP_DIR}/.models-dir" ]]; then IFS= read -r MODELS_DIR < "${APP_DIR}/.models-dir" || true; fi
+  MODELS_DIR="${MODELS_DIR:-$APP_DIR}"
+  [[ "$MODELS_DIR" == "/" ]] || MODELS_DIR="${MODELS_DIR%/}"
+fi
+MODEL_DIR="${LAYA_MODEL_DIR:-${MODELS_DIR}/model}"
 
 banner
 
@@ -120,31 +147,65 @@ ok "Runtime built: ${C_DIM}${APP_DIR}/laya${C_RESET}"
 
 # ----------------------------------------------------------------------------------- models
 section "Models"
+if [[ "$MODELS_DIR" != "$APP_DIR" ]]; then
+  mkdir -p "$MODELS_DIR" 2> /dev/null && [[ -w "$MODELS_DIR" ]] \
+    || fail "The models directory ${MODELS_DIR} cannot be made or written to." \
+            "It is set by --models-dir, LAYA_MODELS_DIR, or ${APP_DIR}/.models-dir; --models-dir default goes back to ${APP_DIR}."
+  info "Models are kept in ${C_BOLD}${MODELS_DIR}${C_RESET} ${C_DIM}(remembered in ${APP_DIR}/.models-dir)${C_RESET}"
+  # Models from before stay where they were: moving gigabytes is for whoever asked to decide.
+  left=()
+  for dir in "${APP_DIR}"/model "${APP_DIR}"/model-*; do
+    [[ -f "${dir}/laya_config.json" || -f "${dir}/clm_config.json" || -f "${dir}/d1_config.json" ]] && left+=("$dir")
+  done
+  if [[ ${#left[@]} -gt 0 ]]; then
+    warn "${#left[@]} model(s) are still in ${APP_DIR} and are no longer read from there."
+    info "To bring them along: ${C_BOLD}mv ${left[*]} ${MODELS_DIR}/${C_RESET}"
+  fi
+fi
 # Which compiled models are on the board, and whether each is complete.
 on_board() {
-  python3 - "${APP_DIR}" <<'PY'
+  python3 - "${MODELS_DIR}" <<'PY'
 import json, os, sys
 root = sys.argv[1]
+
+
+def describe(path):
+    """The files a compiled model needs, its graphs in words and its config; None if it is not one."""
+    if os.path.isfile(os.path.join(path, "clm_config.json")):       # CLM: one graph, in a chain of files
+        cfg = json.load(open(os.path.join(path, "clm_config.json")))
+        names = [n for files in cfg["elfs"].values() for n in files] + [cfg["token_embeddings"], cfg["tokenizer"], cfg["heads"]]
+        return names, ", ".join(sorted(cfg["elfs"], key=int)) + f" tokens, each in {len(next(iter(cfg['elfs'].values())))} parts", cfg
+    if os.path.isfile(os.path.join(path, "d1_config.json")):        # d1: chains too, and a vision tower
+        cfg = json.load(open(os.path.join(path, "d1_config.json")))
+        vision = cfg.get("vision") or {}
+        names = [n for files in cfg["elfs"].values() for n in files] + [cfg["token_embeddings"], cfg["tokenizer"]]
+        names += [cfg["type_embeddings"]] if cfg.get("type_embeddings") else []
+        names += [vision[key] for key in ("elf", "projector", "position_embedding") if vision]
+        return names, ", ".join(sorted(cfg["elfs"], key=int)) + " tokens" + (", reads pictures" if vision else ""), cfg
+    if os.path.isfile(os.path.join(path, "laya_config.json")):
+        cfg = json.load(open(os.path.join(path, "laya_config.json")))
+        names = list(cfg["elfs"].values()) + [cfg["token_embeddings"], cfg["act_tail"], cfg["tokenizer"]]
+        return names, ", ".join(sorted(cfg["elfs"], key=int)) + " tokens", cfg
+    return None
+
+
 for entry in sorted(os.listdir(root)):
     path = os.path.join(root, entry)
     if not (entry == "model" or entry.startswith("model-")):
         continue
     name = "general" if entry == "model" else entry[len("model-"):]
-    if os.path.isfile(os.path.join(path, "clm_config.json")):       # CLM: one graph, in a chain of files
-        cfg = json.load(open(os.path.join(path, "clm_config.json")))
-        names = [n for files in cfg["elfs"].values() for n in files] + [cfg["token_embeddings"], cfg["tokenizer"], cfg["heads"]]
-        graphs = ", ".join(sorted(cfg["elfs"], key=int)) + f" tokens, each in {len(next(iter(cfg['elfs'].values())))} parts"
-    elif os.path.isfile(os.path.join(path, "laya_config.json")):
-        cfg = json.load(open(os.path.join(path, "laya_config.json")))
-        names = list(cfg["elfs"].values()) + [cfg["token_embeddings"], cfg["act_tail"], cfg["tokenizer"]]
-        graphs = ", ".join(sorted(cfg["elfs"], key=int)) + " tokens"
-    else:
-        continue
-    missing = [n for n in names if not os.path.isfile(os.path.join(path, n))]
-    print(f"{name}\t{'missing ' + ', '.join(missing) if missing else graphs + ' · ' + cfg['precision']}\t{int(bool(missing))}")
+    try:
+        described = describe(path)
+        if described is None:
+            continue
+        names, graphs, cfg = described
+        missing = [n for n in names if not os.path.isfile(os.path.join(path, n))]
+        print(f"{name}\t{'missing ' + ', '.join(missing) if missing else graphs + ' · ' + cfg['precision']}\t{int(bool(missing))}")
+    except (OSError, KeyError, ValueError, TypeError, StopIteration) as error:      # a config cut short, or not one
+        print(f"{name}\tits config cannot be read ({type(error).__name__}: {error})\t1")
 PY
 }
-hub() { python3 "${APP_DIR}/webapp/server.py" --model "${MODEL_DIR}" --root "${APP_DIR}" --hub "${HUB}" "$@"; }
+hub() { python3 "${APP_DIR}/webapp/server.py" --model "${MODEL_DIR}" --root "${MODELS_DIR}" --hub "${HUB}" "$@"; }
 
 found=0
 while IFS=$'\t' read -r name detail broken; do

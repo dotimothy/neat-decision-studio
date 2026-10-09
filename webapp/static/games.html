@@ -81,6 +81,7 @@
   button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
 </style>
 <link rel="stylesheet" href="/static/neat.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <header>
@@ -464,6 +465,7 @@ function palette() {
 }
 let color = palette();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { color = palette(); });
+addEventListener("themechange", () => { color = palette(); });               // the header's dark mode button
 
 function resize() {
   const ratio = window.devicePixelRatio || 1;

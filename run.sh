@@ -12,6 +12,10 @@
 #                                models from, or "none" (default: TDoSiMa/sima-laya)
 #   ./run.sh --llm URL           an OpenAI-compatible chat server the games can set Laya against,
 #                                or "none" (default: NEAT GenAI Studio's, http://127.0.0.1:9998)
+#   ./run.sh --no-https          serve HTTP alone. By default the app serves HTTPS too, on the
+#                                same port, with a certificate it makes itself (kept in .tls/),
+#                                and sends browsers there: a page gets the camera only over
+#                                HTTPS. --cert FILE --key FILE use a certificate of your own.
 #   ./run.sh --open-browser      also open the demo in this machine's browser once it is up; if
 #                                the app is already running, only open the browser
 #   ./run.sh --cli               the demo in this terminal instead of a browser: a prompt that
@@ -19,6 +23,10 @@
 #                                the running app, or starts one for as long as the prompt is open.
 #                                --model NAME loads a model first; --ask "QUESTION" answers
 #                                one yes-or-no question and exits; --json prints raw answers
+#   ./run.sh --models-dir DIR    where the models are: `model/` and `model-<name>/` are read
+#                                from, downloaded to and deleted in DIR. For this run only;
+#                                LAYA_MODELS_DIR=DIR does the same, and `./setup.sh --models-dir
+#                                DIR` remembers it. Default: this directory.
 #   ./run.sh --no-games          leave the game model out altogether
 #   ./run.sh --stop              stop a running app
 #   ./run.sh update              update to the latest published version and rebuild the runtime;
@@ -44,8 +52,15 @@
 # fails to load with MLA_LOAD_FAILED: the MLA memory pool is then full or fragmented.
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODEL_DIR="${LAYA_MODEL_DIR:-${APP_DIR}/model}"
-GAME_MODEL_DIR="${LAYA_GAME_MODEL_DIR:-${APP_DIR}/model-dino}"
+# Where the models are: `model/` (the general one) and `model-<name>/`, in one directory. It
+# is this directory unless told otherwise, by --models-dir, else by LAYA_MODELS_DIR, else by
+# what setup.sh was told and wrote in .models-dir (so that the alias and the desktop icon,
+# which pass nothing, use it too). LAYA_MODEL_DIR and LAYA_GAME_MODEL_DIR still name the
+# general and the game model on their own.
+MODELS_DIR="${LAYA_MODELS_DIR:-}"
+if [[ -z "$MODELS_DIR" && -s "${APP_DIR}/.models-dir" ]]; then IFS= read -r MODELS_DIR < "${APP_DIR}/.models-dir" || true; fi
+MODELS_DIR="${MODELS_DIR:-${APP_DIR}}"
+[[ "$MODELS_DIR" == "/" ]] || MODELS_DIR="${MODELS_DIR%/}"
 PORT="${LAYA_PORT:-8095}"
 export MLA_SUDO_PASSWORD="${MLA_SUDO_PASSWORD:-edgeai}"   # the DevKit image's stock password; the app's
                                                           # own Reset Accelerator button needs it too
@@ -57,6 +72,7 @@ preload="${LAYA_PRELOAD:-general}"
 hub="${LAYA_HUB:-TDoSiMa/sima-laya}"
 llm="${LAYA_LLM:-http://127.0.0.1:9998}"
 
+https_args=()      # how the app serves HTTPS, if not in its own way
 cli=0              # the terminal client (webapp/cli.py) instead of a browser
 cli_args=()
 preload_set=0
@@ -199,12 +215,15 @@ do_update() {
     fi
     u_info "Putting ${published} in place ${C_DIM}(keeping the models, the log and the reset token)${C_RESET}"
     # A mirror of the source, so that files a release dropped go here too; everything that
-    # belongs to this installation and not to the source is left out of it.
+    # belongs to this installation and not to the source is left out of it. That includes a
+    # models directory of another name inside this one.
+    keep=()
+    [[ "$MODELS_DIR" == "${APP_DIR}/"* ]] && keep=(--exclude="/${MODELS_DIR#"${APP_DIR}/"}/")
     rsync -a --delete-delay --delay-updates \
       --exclude='/model/' --exclude='/model-*/' --exclude='/models/' --exclude='/build/' \
       --exclude='/third_party/' --exclude='/runtime/build/' --exclude='/laya' \
-      --exclude='/.reset-token' --exclude='*.log' --exclude='/.git/' --exclude='/.venv*/' \
-      --exclude='__pycache__/' \
+      --exclude='/.reset-token' --exclude='/.models-dir' --exclude='/.tls/' --exclude='*.log' --exclude='/.git/' --exclude='/.venv*/' \
+      --exclude='__pycache__/' "${keep[@]}" \
       "${tmp}/${root}/" "${APP_DIR}/" \
       || { u_err "The source could not be put in place."; rm -rf "${tmp}"; return 1; }
     rm -rf "${tmp}"
@@ -228,7 +247,7 @@ do_update() {
 # Before anything that needs the runtime: an update is also how a broken build gets mended.
 case "${1:-}" in
   update|--update|upgrade) do_update; exit $? ;;
-  -h|--help) sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,52p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
 [[ -x "${APP_DIR}/laya" ]] || fail "the runtime is not built yet; run ./setup.sh first"
@@ -236,7 +255,7 @@ esac
 # `cli` followed by arguments is the older spelling of `runtime`; alone it is `--cli`.
 if [[ "${1:-}" == "runtime" || ( "${1:-}" == "cli" && $# -gt 1 ) ]]; then
   shift
-  cd "${APP_DIR}"
+  cd "${MODELS_DIR}" 2> /dev/null || cd "${APP_DIR}"      # so that `model` and `model-<name>` name the models
   exec "${APP_DIR}/laya" "$@"
 fi
 
@@ -247,6 +266,10 @@ while [[ $# -gt 0 ]]; do
     --reset-mla) reset=1; shift ;;
     --require-reset-token) require_token=1; shift ;;
     --no-games) games=0; shift ;;
+    --no-https) https_args=(--https off); shift ;;
+    --cert) https_args+=(--cert "${2:?--cert needs a file}"); shift 2 ;;
+    --key) https_args+=(--key "${2:?--key needs a file}"); shift 2 ;;
+    --models-dir) MODELS_DIR="${2:?--models-dir needs a directory}"; [[ "$MODELS_DIR" == "/" ]] || MODELS_DIR="${MODELS_DIR%/}"; shift 2 ;;
     --preload) preload="${2:?--preload needs a value}"; preload_set=1; shift 2 ;;
     --hub) hub="${2:?--hub needs a value}"; shift 2 ;;
     --llm) llm="${2:?--llm needs a URL, or none}"; shift 2 ;;
@@ -267,10 +290,18 @@ while [[ $# -gt 0 ]]; do
       pids="$(pgrep -f 'python3 .*webapp/server[.]py' || true)"
       [[ -n "$pids" ]] && kill -TERM $pids && echo "stopped" || echo "not running"
       exit 0 ;;
-    -h|--help) sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,52p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "unknown option: $1 (see --help)" ;;
   esac
 done
+
+# The models directory may be new: downloads go there.
+mkdir -p "${MODELS_DIR}" 2> /dev/null && [[ -w "${MODELS_DIR}" ]] \
+  || fail "the models directory ${MODELS_DIR} cannot be made or written to (--models-dir, LAYA_MODELS_DIR, or ${APP_DIR}/.models-dir)"
+MODELS_DIR="$(cd "${MODELS_DIR}" && pwd)"
+MODEL_DIR="${LAYA_MODEL_DIR:-${MODELS_DIR}/model}"
+GAME_MODEL_DIR="${LAYA_GAME_MODEL_DIR:-${MODELS_DIR}/model-dino}"
+[[ "$MODELS_DIR" == "$APP_DIR" || $cli -eq 1 ]] || echo "Models: ${MODELS_DIR}"
 
 # With no compiled model on the board the app still starts: its Models page downloads them.
 [[ -f "${MODEL_DIR}/laya_config.json" || $cli -eq 1 ]] \
@@ -323,33 +354,42 @@ if ss -ltn 2> /dev/null | grep -q ":${PORT} "; then
 fi
 
 address="$(hostname -I 2> /dev/null | awk '{print $1}')"
-[[ $cli -eq 1 ]] || echo "Starting; the demo will be at http://${address:-<board-ip>}:${PORT} (models: /models)"
+scheme=https; [[ " ${https_args[*]} " == *" off "* ]] && scheme=http
+[[ $cli -eq 1 ]] || echo "Starting; the demo will be at ${scheme}://${address:-<board-ip>}:${PORT} (models: /models)"
 # For the terminal prompt nothing is loaded up front unless asked for: the prompt shows a
 # model loading, and lets one be chosen.
 [[ $cli -eq 1 && $preload_set -eq 0 ]] && preload="none"
-args=(--model "${MODEL_DIR}" --laya "${APP_DIR}/laya" --port "${PORT}" --preload "${preload}" --root "${APP_DIR}"
-      --hub "${hub}" --llm "${llm}")
+args=(--model "${MODEL_DIR}" --laya "${APP_DIR}/laya" --port "${PORT}" --preload "${preload}" --root "${MODELS_DIR}"
+      --hub "${hub}" --llm "${llm}" "${https_args[@]}")
 [[ -n "${seq_lens}" && "${seq_lens}" != "all" ]] && args+=(--seq-lens "${seq_lens}")
 [[ "${require_token}" == "1" ]] && args+=(--require-reset-token)
 # Every other model-<name> directory is a question model the page can switch to.
-for dir in "${APP_DIR}"/model-*/; do
+for dir in "${MODELS_DIR}"/model-*/; do
   name="$(basename "$dir")"; name="${name#model-}"
-  [[ "$name" == "dino" || ! ( -f "${dir}laya_config.json" || -f "${dir}clm_config.json" ) ]] && continue
+  [[ "$name" == "dino" || ! ( -f "${dir}laya_config.json" || -f "${dir}clm_config.json" || -f "${dir}d1_config.json" ) ]] && continue
   args+=(--extra-model "${name}=${dir%/}")
 done
 if [[ $games -eq 1 && -f "${GAME_MODEL_DIR}/laya_config.json" ]]; then
   args+=(--game-model "${GAME_MODEL_DIR}")
-  [[ $cli -eq 1 ]] || echo "Games: http://${address:-<board-ip>}:${PORT}/games"
+  [[ $cli -eq 1 ]] || echo "Games: ${scheme}://${address:-<board-ip>}:${PORT}/games"
 fi
 if [[ $cli -eq 1 ]]; then
   # The prompt owns the app: started quietly here, stopped when the prompt is left.
   python3 "${APP_DIR}/webapp/server.py" "${args[@]}" > "${APP_DIR}/webapp.log" 2>&1 &
   server=$!
   trap 'kill -TERM "$server" 2> /dev/null; wait "$server" 2> /dev/null' EXIT
+  # The wait is drawn as the prompt draws its own: a spinner whose colour moves through the
+  # Neat palette, and the seconds waited so far.
+  frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏); drift=("$P_TEAL" "$P_GREEN" "$P_LIME" "$P_BLUE" "$P_ORANGE"); tick=0; waiting=$SECONDS
   until answers "$url"; do
-    kill -0 "$server" 2> /dev/null || { tail -n 5 "${APP_DIR}/webapp.log" >&2; fail "the app did not start (log: ${APP_DIR}/webapp.log)"; }
-    sleep 0.3
+    kill -0 "$server" 2> /dev/null || { [[ -t 1 ]] && printf '\r\033[K'; tail -n 5 "${APP_DIR}/webapp.log" >&2; fail "the app did not start (log: ${APP_DIR}/webapp.log)"; }
+    for _ in 1 2 3; do
+      [[ -t 1 && -n "$C_RESET" ]] && printf '\r\033[K  %s%s%s %sstarting the app…%s  %s%ss%s' "${drift[$(( tick / 4 % 5 ))]}" "${frames[$(( tick % 10 ))]}" "$C_RESET" \
+        "$C_MUTED" "$C_RESET" "$C_DIM" "$(( SECONDS - waiting ))" "$C_RESET"
+      tick=$(( tick + 1 )); sleep 0.1
+    done
   done
+  [[ -t 1 && -n "$C_RESET" ]] && printf '\r\033[K'
   status=0
   python3 "${APP_DIR}/webapp/cli.py" --url "$url" "${cli_args[@]}" || status=$?
   exit $status

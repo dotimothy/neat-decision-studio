@@ -134,6 +134,7 @@
   .option.fatal .what { color: var(--bad); }
 </style>
 <link rel="stylesheet" href="/static/neat.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <header>
@@ -307,6 +308,7 @@ function palette() {
 }
 let color = palette();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { color = palette(); draw(); });
+addEventListener("themechange", () => { color = palette(); draw(); });        // the header's dark mode button
 
 // One snake's board on its canvas, `width` pixels wide at most.
 function paint(canvas, world, room, { veil = false, headColor, message = null }) {

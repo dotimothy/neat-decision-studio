@@ -30,12 +30,14 @@
 "use strict";
 
 const CHECKPOINT_SHORT = {
-  "CLM-v0.1-8B": "CLM", "laya": "Laya", "laya-typed-decisions": "Laya Typed-Decisions", "laya-multilingual": "Laya Multilingual",
+  "CLM-v0.1-8B": "CLM", "d1-omni-600M": "d1 Omni", "d1-3B": "d1 3B", "laya": "Laya", "laya-typed-decisions": "Laya Typed-Decisions", "laya-multilingual": "Laya Multilingual",
   "laya-dino": "Laya-dino", "laya-chess": "Laya-chess",
 };
 
 const CHECKPOINT_TITLES = {
   "CLM-v0.1-8B": "CLM v0.1 8B (Qwen3-8B encoder)",
+  "d1-omni-600M": "d1 Omni 600M (text and pictures)",
+  "d1-3B": "d1 3B (text and pictures)",
   "laya": "Laya (English, general)",
   "laya-typed-decisions": "Laya typed-decisions",
   "laya-multilingual": "Laya multilingual",
@@ -74,13 +76,13 @@ function createModelPicker({ mount, onReady, madeFor }) {
 
   const picker = { name: null, ready: false, models: {}, loaded: [], budget: 0, onBudget: null };
   const title = (name) => (CHECKPOINT_TITLES[picker.models[name]?.checkpoint] || name)
-    + (picker.models[name]?.precision === "A_BF16_W_INT8" && picker.models[name]?.kind !== "clm" ? ", INT8 weights" : "");
+    + (picker.models[name]?.precision === "A_BF16_W_INT8" && picker.models[name]?.kind === "laya" ? ", INT8 weights" : "");
   let touched = false, active = false;
 
   // Seats: see the top of the file.
   const seated = [];
   picker.short = (name) => (CHECKPOINT_SHORT[picker.models[name]?.checkpoint] || name || "Laya")
-    + (picker.models[name]?.precision === "A_BF16_W_INT8" && picker.models[name]?.kind !== "clm" ? " INT8" : "");
+    + (picker.models[name]?.precision === "A_BF16_W_INT8" && picker.models[name]?.kind === "laya" ? " INT8" : "");
   picker.seatModel = (select) => {
     const model = select.selectedOptions[0]?.dataset.model;
     return picker.loaded.includes(model) ? model : picker.name;
@@ -146,7 +148,7 @@ function createModelPicker({ mount, onReady, madeFor }) {
       : [kept(), picker.name, madeFor].find((name) => all.includes(name))
         // A page made for no model in particular starts on one that is not a game's own.
         // Among those a Laya before CLM: the pages are worded for Laya, and it answers at once.
-        || all.find((name) => !/chess|dino/.test(info.models[name].checkpoint || "") && info.models[name].kind !== "clm")
+        || all.find((name) => !/chess|dino/.test(info.models[name].checkpoint || "") && info.models[name].kind === "laya")
         || all.find((name) => !/chess|dino/.test(info.models[name].checkpoint || "")) || all[0] || null;
     const loading = Object.keys(info.models).find((name) => info.models[name].state === "loading");
     if (loaded !== picker.name && picker.ready) { picker.ready = false; picker.name = null; onReady(false); }   // gone, or another chosen

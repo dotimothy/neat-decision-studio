@@ -103,11 +103,12 @@
   @keyframes pop { from { transform: scale(.7); } to { transform: scale(1); } }
 </style>
 <link rel="stylesheet" href="/static/neat.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <header>
   <h1>Tic-Tac-Toe</h1>
-  <p id="tagline">Play Laya, watch two of it, or set it against a language model: each of its moves is one decision on the Modalix MLA</p>
+  <p id="tagline">Play Laya, watch two of it, or set it against a language model or a perfect minimax player: each of its moves is one decision on the Modalix MLA</p>
   <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a class="here" href="/games">Games</a></nav>
 </header>
 <script src="/static/brand.js"></script>
@@ -117,8 +118,8 @@
     <div class="row boardhead">
       <h2>Board</h2>
       <span class="seats">
-        <label for="seatX">X</label><select id="seatX" aria-label="Who plays X"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option></select>
-        <label for="seatO">O</label><select id="seatO" aria-label="Who plays O"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option></select>
+        <label for="seatX">X</label><select id="seatX" aria-label="Who plays X"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option><option value="minimax">Minimax</option></select>
+        <label for="seatO">O</label><select id="seatO" aria-label="Who plays O"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option><option value="minimax">Minimax</option></select>
         <label for="deep">Laya Looks</label>
         <select id="deep" aria-label="How far Laya looks"><option value="1">To the End of the Game</option><option value="0">One Move Ahead</option></select>
       </span>
@@ -231,7 +232,16 @@ async function llmMove() {
   llm.played(reply, square, Boolean(said));
   return TTT_SQUARES.indexOf(square);
 }
-const NAMES = { you: "you", laya: "Laya", llm: "the LLM" };
+// The traditional player: minimax to the end of the game (tttValue), which here is small
+// enough to search whole, so it never loses. Among moves that are equally good it takes any.
+function minimaxMove() {
+  const other = tttOther(turn);
+  const worth = tttEmpty(board).map((i) => { const next = board.slice(); next[i] = turn; return [i, -tttValue(next, other)]; });
+  const best = Math.max(...worth.map(([, value]) => value));
+  const choices = worth.filter(([, value]) => value === best).map(([i]) => i);
+  return choices[Math.floor(Math.random() * choices.length)];
+}
+const NAMES = { you: "you", laya: "Laya", llm: "the LLM", minimax: "Minimax" };
 // Any loaded model can take a mark, so two different models can play each other.
 const mover = () => picker.seatModel($("seat" + turn));
 const nameOf = (mark) => seats[mark] === "laya" ? picker.short(picker.seatModel($("seat" + mark))) : NAMES[seats[mark]];
@@ -308,7 +318,7 @@ async function loop() {
     const playing = round, started = performance.now();
     draw();
     let square;
-    try { square = who === "laya" ? await decide() : await llmMove(); } catch (error) {
+    try { square = who === "laya" ? await decide() : who === "minimax" ? minimaxMove() : await llmMove(); } catch (error) {
       if (error instanceof NotLoaded) { picker.lost(); break; }
       $("error").hidden = false; $("error").textContent = error.message;
       setAuto(false);
@@ -356,6 +366,8 @@ $("deep").onchange = () => { $("deepNote").textContent = DEEP_NOTES[$("deep").va
 $("deepNote").textContent = DEEP_NOTES[$("deep").value];
 
 const llm = createLLMPlayer(document.querySelectorAll("main > section")[1]);
+llm.reads = "The reply is searched for the names of squares (top-left, centre, bottom, and so on; \"center\" counts), and the first one "
+  + "that names an empty square is played.";
 llm.show(seats.X === "llm" || seats.O === "llm");
 const picker = createModelPicker({ mount: $("picker"), onReady: (loaded) => { draw(); if (loaded) loop(); } });
 picker.seats($("seatX"), $("seatO"));

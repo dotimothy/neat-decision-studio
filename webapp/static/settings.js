@@ -28,6 +28,8 @@
     "laya-multilingual": ["Laya multilingual", "More than 100 languages, on a smaller encoder that answers about twice as fast.", "mmBERT-base, 322M parameters", "100+ languages"],
     "laya-dino": ["Laya-dino", "Decision head fine-tuned for Dino Arena.", "ModernBERT-large, 421M parameters", "English (game states)"],
     "CLM-v0.1-8B": ["CLM v0.1 8B", "A Contrastive Language Model: a frozen Qwen3-8B reads the state and each option, two small heads compare them. The same three kinds of question as Laya, on an encoder twenty times the size.", "Qwen3-8B, 8.2B parameters, in a chain of graphs", "English"],
+    "d1-omni-600M": ["d1 Omni 600M", "LiquidAI's small decision model, which also reads pictures: an LFM2 encoder read in both directions, a decision head and a SigLIP2 vision tower. The same three kinds of question, about text or about a picture. An early research release.", "LFM2.5-Encoder-350M and SigLIP2, 475M parameters", "English"],
+    "d1-3B": ["d1 3B", "LiquidAI's larger decision model: the LFM2.5-VL-3B language model, asked a question as a chat turn and read at the one token where its answer would begin. Text and pictures; the more careful reader of the two d1 models.", "LFM2.5-VL-3B with a SigLIP2 vision tower, 3.1B parameters, in a chain of graphs", "English"],
     "laya-chess": ["Laya-chess", "LayaChess: Laya fine-tuned on two million Stockfish-rated moves, to rate a chess move's win chance.", "ModernBERT-large, 421M parameters", "English (chess positions)"],
   };
   const PRECISIONS = { "BF16": "bfloat16 weights and activations", "A_BF16_W_INT8": "int8 weights, bfloat16 activations",
@@ -234,7 +236,7 @@
 
   function card(name, local, remote) {
     const known = CHECKPOINTS[local?.checkpoint] || [];
-    const int8 = local && !remote && local.kind !== "clm" && local.precision === "A_BF16_W_INT8";
+    const int8 = local && !remote && local.kind === "laya" && local.precision === "A_BF16_W_INT8";
     const title = remote?.title || (known[0] || local.checkpoint || name) + (int8 ? " INT8" : "");
     const about = remote?.about || known[1] || "";
     const precision = local?.precision || remote?.precision;
@@ -257,7 +259,7 @@
       if (local) {
         // To begin with one length is ticked, since each is another copy of the weights: a Laya's
         // shortest, and CLM's longest, which is the one that takes a whole question in one pass.
-        chosen[name] ??= new Set(local.loaded ? local.loaded_seq_lens : local.kind === "clm" ? local.seq_lens.slice(-1) : local.seq_lens.slice(0, 1));
+        chosen[name] ??= new Set(local.loaded ? local.loaded_seq_lens : local.kind === "clm" ? local.seq_lens.slice(-1) : local.kind === "d1" && local.graphs.every((graph) => graph.files === 1) ? local.seq_lens : local.kind === "d1" ? local.seq_lens.slice(-1) : local.seq_lens.slice(0, 1));
         const box = el("input", { type: "checkbox", checked: local.loaded ? local.loaded_seq_lens.includes(graph.seq_len) : chosen[name].has(graph.seq_len),
                                   disabled: local.loaded || working });
         box.onchange = () => { box.checked ? chosen[name].add(graph.seq_len) : chosen[name].delete(graph.seq_len); render(); };
@@ -285,7 +287,9 @@
         remote.card?.license ? ` (${remote.card.license})` : "");
     } else {
       fact("Source", "compiled and copied to this board; not on Hugging Face",
-           ...(local.kind === "clm" ? [", from ", el("a", { href: "https://huggingface.co/Contrastive-LM/CLM-v0.1-8B", target: "_blank", rel: "noopener", textContent: "Contrastive-LM/CLM-v0.1-8B" }), " (Apache-2.0)"] : []));
+           ...(local.kind === "clm" ? [", from ", el("a", { href: "https://huggingface.co/Contrastive-LM/CLM-v0.1-8B", target: "_blank", rel: "noopener", textContent: "Contrastive-LM/CLM-v0.1-8B" }), " (Apache-2.0)"] : []),
+           ...(local.kind === "d1" ? [", from ", el("a", { href: `https://huggingface.co/LiquidAI/${local.checkpoint}`, target: "_blank", rel: "noopener", textContent: `LiquidAI/${local.checkpoint}` }),
+                                      " (LFM Open License v1.0: commercial use is limited to organisations under 10 million dollars of annual revenue)"] : []));
     }
 
     // What it takes or would take on the MLA, said where the Load button is decided.
@@ -490,7 +494,8 @@
 
     const disk = hub?.repo ? el("p", { className: "note" }, "Models come from ",
       el("a", { href: hub.page, target: "_blank", rel: "noopener", textContent: hub.repo }),
-      ` on Hugging Face onto this board's disk, which has ${mb(hub.free_bytes)} free.`) : "";
+      " on Hugging Face onto this board's disk", ...(hub.directory ? [", in ", el("code", { textContent: hub.directory })] : []),
+      `, which has ${mb(hub.free_bytes)} free.`) : "";
     panels.add.replaceChildren(
       el("div", { className: "block" }, el("div", { className: "label", textContent: "Available to Download — from Hugging Face" }), disk,
         hub?.error ? el("p", { className: "said", textContent: hub.error }) : "",

@@ -134,6 +134,21 @@
   .latrow .who { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .latrow .who small { font-weight: 400; color: var(--muted); margin-left: 5px; }
   .latrow span b { font-weight: 650; }
+  /* The alpha-beta engine's search, laid out: a row a depth, and a row a first move. */
+  .abrow { display: grid; gap: 6px 8px; align-items: center; font-size: 13px; padding: 5px 9px; border-radius: 8px; font-variant-numeric: tabular-nums; }
+  .abrow.head { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding-bottom: 2px; }
+  .abrow:not(.head):nth-child(even) { background: var(--chip); }
+  .abrow b { font-family: var(--mono); font-weight: 650; }
+  .abrow.best b { color: var(--accent-strong, var(--accent)); }
+  .abrow .dim { color: var(--muted); }
+  #abDepths .abrow { grid-template-columns: 0.6fr 1fr 1.3fr 1.1fr 1fr 1fr; }
+  #abRoot .abrow { grid-template-columns: 62px 1.5fr 0.9fr minmax(40px, 1.2fr); }
+  #abRoot .track { height: 7px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  #abRoot .track i { display: block; height: 100%; background: var(--accent); opacity: .45; border-radius: 999px; }
+  #abRoot .best .track i { opacity: 1; }
+  #abCount .abrow { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  ol.method { margin: 6px 0 0; padding-left: 20px; font-size: 13.5px; color: var(--muted); display: grid; gap: 7px; }
+  ol.method b { color: var(--ink); font-weight: 600; }
   .option { display: grid; grid-template-columns: 64px minmax(0, 1fr) 52px; gap: 2px 8px; align-items: center; margin-top: 6px; font-size: 13.5px; }
   .option .name { font-family: var(--mono); }
   .option.top .name { font-weight: 700; }
@@ -146,11 +161,12 @@
   .asked { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
 </style>
 <link rel="stylesheet" href="/static/neat.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <header>
   <h1>Chess</h1>
-  <p id="tagline">Laya scores every legal move on the Modalix MLA and plays the one it rates highest. Play it, or set it against a language model</p>
+  <p id="tagline">Laya scores every legal move on the Modalix MLA and plays the one it rates highest. Play it, or set it against another model, a language model or a classical alpha-beta search</p>
   <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a class="here" href="/games">Games</a></nav>
 </header>
 <script src="/static/brand.js"></script>
@@ -160,8 +176,8 @@
     <div class="row boardhead">
       <h2>Board</h2>
       <span class="seats">
-        <label for="white">White</label><select id="white" aria-label="Who plays white"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option></select>
-        <label for="black">Black</label><select id="black" aria-label="Who plays black"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option></select>
+        <label for="white">White</label><select id="white" aria-label="Who plays white"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option><option value="engine">Alpha-Beta</option></select>
+        <label for="black">Black</label><select id="black" aria-label="Who plays black"><option value="you">You</option><option value="laya">Laya</option><option value="llm">An LLM</option><option value="engine">Alpha-Beta</option></select>
       </span>
     </div>
     <div id="boardwrap"><div class="chess" id="board" role="grid" aria-label="Chess board"></div></div>
@@ -178,6 +194,12 @@
     <div class="row controls">
       <span class="status" id="status">&nbsp;</span>
       <span class="row">
+        <select id="depth" aria-label="How far the alpha-beta search looks" hidden>
+          <option value="1">Alpha-Beta: 1 Ply</option>
+          <option value="2">Alpha-Beta: 2 Plies</option>
+          <option value="3" selected>Alpha-Beta: 3 Plies</option>
+          <option value="4">Alpha-Beta: 4 Plies</option>
+        </select>
         <select id="look" aria-label="How far Laya looks">
           <option value="1">One Look</option>
           <option value="2">Second Look</option>
@@ -190,7 +212,7 @@
     <div class="movelist" id="moves" aria-label="Moves played">&nbsp;</div>
     <div class="latency" aria-live="off">
       <div class="scorehead"><h2>Latency per Move</h2><span class="lead" id="latencyNote">&nbsp;</span></div>
-      <div class="latrow head"><span>Side</span><span>Last Move</span><span>Average</span><span>Decisions a Move</span></div>
+      <div class="latrow head"><span>Side</span><span>Last Move</span><span>Average</span><span>Decisions, or Positions Searched</span></div>
       <div class="latrow"><span class="who" id="latWhoW">White</span><span id="latLastW">&ndash;</span><span id="latMeanW">&ndash;</span><span id="latCountW">&ndash;</span></div>
       <div class="latrow"><span class="who" id="latWhoB">Black</span><span id="latLastB">&ndash;</span><span id="latMeanB">&ndash;</span><span id="latCountB">&ndash;</span></div>
     </div>
@@ -223,6 +245,66 @@
       <h2>How it rates the moves</h2>
       <p class="asked" id="ratedNote">&nbsp;</p>
       <div id="options"></div>
+    </div>
+    <div class="block" id="enginePanel" hidden>
+      <h2>Alpha-Beta's search</h2>
+      <div class="hero"><span class="value" id="abNodes">&ndash;</span><span class="unit">positions searched for its last move</span></div>
+      <div class="stats">
+        <div class="stat"><b id="abDepth">&ndash;</b><span>plies it looked ahead</span></div>
+        <div class="stat"><b id="abPruned">&ndash;</b><span>branches pruned</span></div>
+        <div class="stat"><b id="abRate">&ndash;</b><span>positions per second</span></div>
+        <div class="stat"><b id="abTime">&ndash;</b><span>time for the move</span></div>
+        <div class="stat"><b id="abScore">&ndash;</b><span id="abScoreLabel">how it judges the game</span></div>
+        <div class="stat"><b id="abQuiet">&ndash;</b><span>of them playing captures out</span></div>
+      </div>
+      <div class="block">
+        <h2>The line it expects</h2>
+        <p class="asked" id="abLine">It has not moved yet.</p>
+        <p class="note">Its own move, then the best reply it found, and so on to the end of its look-ahead. It chooses the move
+          whose worst case is best: this is the line where both sides do what it thinks is best for them.</p>
+      </div>
+      <div class="block">
+        <h2>Depth by depth</h2>
+        <div id="abDepths"></div>
+        <p class="note" id="abDepthNote">It searches one ply deep, then two, and so on, each time trying the last depth's best move first:
+          a good first move is what lets the pruning cut the rest short. A depth that runs out of time is dropped.</p>
+      </div>
+      <div class="block">
+        <h2>The moves it weighed</h2>
+        <p class="asked" id="abRootNote">&nbsp;</p>
+        <div id="abRoot"></div>
+        <p class="note">In the order it tried them. The first move searched gets a full score and sets the bar. Each later move is
+          searched only until it is shown not to clear the bar, so most have no score, only the most they could be worth, and
+          cost a fraction of the positions: that is alpha-beta pruning at work. A move that clears the bar becomes the new best.</p>
+      </div>
+      <div class="block">
+        <h2>How it counts the position</h2>
+        <div id="abCount"></div>
+        <p class="note">All its judgement is this sum, in pawns. A pawn is 1, a knight 3.2, a bishop 3.3, a rook 5, a queen 9. Placement
+          is by rule: knights and bishops toward the centre, pawns forward (more in the centre, much more on the seventh rank),
+          rooks on the seventh rank and the middle files, the king in its corner while the queens are on and in the centre
+          once they are off.</p>
+      </div>
+      <div class="block">
+        <h2>Its method</h2>
+        <ol class="method">
+          <li><b>Minimax.</b> It looks a fixed number of plies ahead and assumes each side plays what is best for itself; a
+            position's worth is what the side to move can be sure of. (Written as negamax: one routine, the sign flipped each ply.)</li>
+          <li><b>Alpha-beta pruning.</b> It carries two bounds down the tree: what it can already be sure of, and what the
+            opponent can already hold it to. Once a reply is found that makes a move worse than one already in hand, the move's
+            other replies are not looked at. The answer is the same as full minimax; the positions are far fewer.</li>
+          <li><b>Move ordering.</b> The last depth's best line first, then captures of the biggest piece by the smallest, then
+            promotions. Pruning cuts most when the best move is tried first.</li>
+          <li><b>Iterative deepening.</b> Depth 1, then 2, up to the depth chosen, within eight seconds a move.</li>
+          <li><b>Quiescence.</b> At the end of the look-ahead it does not score the position as it stands: it plays captures
+            out (up to four more plies), so it never counts a piece it is about to lose.</li>
+          <li><b>Endings.</b> Checkmate is worth more than any material, and a sooner mate more than a later one. Stalemate, bare
+            kings and a third repetition (looked for right after its own move) are worth nothing.</li>
+          <li><b>What it does not have.</b> Nothing learned, no opening book, no memory of positions it has already searched, and
+            no notion of pawn structure or king safety beyond the placement rules. It is JavaScript on chess.js's rules, a few
+            thousand positions a second, where a native engine searches millions.</li>
+        </ol>
+      </div>
     </div>
   </section>
 </main>
@@ -350,7 +432,84 @@ async function llmMove(playing) {
   llm.played(reply, move.san, legal);
   return move;
 }
-const NAMES = { you: "you", laya: "Laya", llm: "the LLM" };
+// A traditional engine's move (chess-engine.js): alpha-beta search over counted material and
+// placement, nothing learned and nothing on the MLA. It runs in a worker in this browser.
+let engineWorker = null, engineAsk = 0;
+const ENGINE_MS = 8000;                    // a depth that takes longer is cut short at the last one finished
+function engineMove(playing) {
+  if (!engineWorker) engineWorker = new Worker("/static/chess-engine.js");
+  considering = null; draw();
+  const id = ++engineAsk, side = game.turn() === "w" ? "White" : "Black";
+  return new Promise((resolve, reject) => {
+    engineWorker.onerror = (event) => reject(new Error("The alpha-beta engine failed: " + event.message));
+    engineWorker.onmessage = ({ data }) => {
+      if (data.id !== id) return;                       // an answer to an earlier position
+      if (playing !== round) return reject(new Stale());
+      lastSearch = data;
+      showSearch(data, side);
+      resolve({ from: data.move.from, to: data.move.to, promotion: data.move.promotion });
+    };
+    engineWorker.postMessage({ id, moves: game.history(), depth: Number($("depth").value), ms: ENGINE_MS });
+  });
+}
+let lastSearch = null;
+const engineSeated = () => seats.w === "engine" || seats.b === "engine";
+function showEngine() { $("depth").hidden = $("enginePanel").hidden = !engineSeated(); }
+
+// A score as the engine has it, for the side that was to move: pawns, or a mate.
+const pawns = (score, mate) => mate !== null && mate !== undefined ? (mate > 0 ? `mate in ${mate}` : `mated in ${-mate}`)
+  : (score > 0 ? "+" : score < 0 ? "\u2212" : "") + Math.abs(score).toFixed(2);
+// The engine's last search, laid out: what it found at each depth, what became of each first
+// move, and the sum its judgement is.
+function showSearch(data, side) {
+  const cell = (text, className = "") => Object.assign(document.createElement("span"), { textContent: text, className });
+  const strong = (text) => Object.assign(document.createElement("b"), { textContent: text });
+  const row = (className, ...cells) => { const node = Object.assign(document.createElement("div"), { className: "abrow " + className }); node.append(...cells); return node; };
+  const other = side === "White" ? "Black" : "White";
+  $("abNodes").textContent = data.nodes.toLocaleString();
+  $("abDepth").textContent = data.depth + (data.cut ? ` of ${data.asked}` : "");
+  $("abPruned").textContent = data.pruned.toLocaleString();
+  $("abRate").textContent = Math.round(data.nodes / data.ms * 1000).toLocaleString();
+  $("abTime").textContent = seconds(data.ms);
+  $("abScore").textContent = pawns(data.score, data.mate);
+  $("abScoreLabel").textContent = data.mate !== null ? `for ${side}, as it sees it` : Math.abs(data.score) < 0.15 ? "pawns: it thinks the game level"
+    : `pawns: it thinks ${data.score > 0 ? side : other} ahead`;
+  $("abQuiet").textContent = Math.round(data.quiet / data.nodes * 100) + "%";
+  $("abLine").textContent = data.line.map((san, i) => `${i % 2 ? other : side} ${san}`).join(",  ");
+  $("abDepthNote").hidden = false;
+  $("abDepths").replaceChildren(row("head", cell("Depth"), cell("Best"), cell("Judgement"), cell("Positions"), cell("Pruned"), cell("Time")),
+    ...data.depths.map((d) => row(d.depth === data.depth ? "best" : "", cell(String(d.depth)), strong(d.move), cell(pawns(d.score, d.mate)),
+      cell(d.nodes.toLocaleString()), cell(d.pruned.toLocaleString()), cell(seconds(d.ms)))),
+    ...(data.cut ? [row("", cell(String(data.depth + 1), "dim"), cell("ran out of time, dropped", "dim"), cell(""), cell(""), cell(""), cell(""))] : []));
+  const most = Math.max(...data.root.map((move) => move.nodes), 1), shown = data.root.slice(0, 12);
+  const scored = data.root.filter((move) => move.exact).length;
+  $("abRootNote").textContent = `${data.root.length} legal moves at ${data.depth} ${data.depth === 1 ? "ply" : "plies"}: ${scored} got a full score, `
+    + `${data.root.length - scored} were cut short once they could not beat ${data.move.san}.`;
+  $("abRoot").replaceChildren(row("head", cell("Move"), cell("Worth"), cell("Positions"), cell("")),
+    ...shown.map((move) => {
+      const fill = document.createElement("i"); fill.style.width = (move.nodes / most * 100).toFixed(1) + "%";
+      const track = Object.assign(document.createElement("span"), { className: "track" }); track.append(fill);
+      return row(move.san === data.move.san ? "best" : "", strong(move.san),
+        cell(move.exact ? pawns(move.score, move.mate) + (move.san === data.move.san ? " \u00b7 played" : " \u00b7 beaten later")
+                        : `at most ${pawns(move.score, move.mate)}`, move.exact ? "" : "dim"),
+        cell(move.nodes.toLocaleString()), track);
+    }),
+    ...(data.root.length > shown.length ? [Object.assign(document.createElement("p"), { className: "note",
+      textContent: `and ${data.root.length - shown.length} more after these, ${data.root.slice(12).filter((move) => move.exact).length ? "some of them scored in full" : "each cut short"}.` })] : []));
+  const c = data.counted, p = (value) => (value / 100).toFixed(2), signed = (value) => (value > 0 ? "+" : value < 0 ? "\u2212" : "") + Math.abs(value / 100).toFixed(2);
+  const total = (colour) => c.material[colour] + c.placement[colour];
+  const mine = side === "White" ? "w" : "b", theirs = side === "White" ? "b" : "w";
+  $("abCount").replaceChildren(row("head", cell("Before Its Move"), cell("Material"), cell("Placement"), cell("Sum")),
+    row("", cell("White"), cell(p(c.material.w)), cell(signed(c.placement.w)), strong(p(total("w")))),
+    row("", cell("Black"), cell(p(c.material.b)), cell(signed(c.placement.b)), strong(p(total("b")))),
+    row("best", cell(`${side} less ${other}`), cell(signed(c.material[mine] - c.material[theirs])), cell(signed(c.placement[mine] - c.placement[theirs])),
+        strong(signed(total(mine) - total(theirs)))),
+    Object.assign(document.createElement("p"), { className: "note", textContent: c.endgame
+      ? "Counted as an endgame (the queens are off, or few pieces are left): the king belongs in the centre."
+      : "Counted as a middlegame: the king belongs in its corner." }));
+}
+
+const NAMES = { you: "you", laya: "Laya", llm: "the LLM", engine: "Alpha-Beta" };
 // Any loaded model can take a colour, so two different models can play each other.
 const seatOf = (colour) => $(colour === "w" ? "white" : "black");
 const mover = () => picker.seatModel(seatOf(game.turn()));
@@ -417,7 +576,8 @@ function draw() {
   const took = Object.fromEntries(timings.map((t) => [t.ply, t]));
   $("moves").replaceChildren(...history.flatMap((san, i) => {
     const t = took[i + 1], time = t ? Object.assign(document.createElement("small"), { textContent: seconds(t.ms),
-      title: `${t.who}: ${seconds(t.ms)} for this move` + (t.decisions ? `, ${t.decisions} decisions, ${Math.round(t.mla)} ms of it on the MLA` : "") }) : "";
+      title: `${t.who}: ${seconds(t.ms)} for this move` + (t.decisions ? `, ${t.decisions} decisions, ${Math.round(t.mla)} ms of it on the MLA` : "")
+        + (t.nodes ? `, ${t.nodes.toLocaleString()} positions searched` : "") }) : "";
     return [i % 2 === 0 ? `${i / 2 + 1}. ` : "", Object.assign(document.createElement("b"), { textContent: san }), time, " "];
   }));
   showLatency();
@@ -431,7 +591,8 @@ function draw() {
     : !picker.ready && seats[turn] === "laya" ? "No model is on the MLA. Load Laya-chess in Settings."
     : seats[turn] === "you" ? `${side} to move: yours` + (game.in_check() ? ", and you are in check" : "")
     : !auto ? `${side} to move: ${nameOf(turn)}, paused`
-    : seats[turn] === "laya" ? `${side} to move: ${nameOf(turn)} is rating the moves` : `${side} to move: the LLM is writing its move`;
+    : seats[turn] === "laya" ? `${side} to move: ${nameOf(turn)} is rating the moves`
+    : seats[turn] === "engine" ? `${side} to move: Alpha-Beta is searching` : `${side} to move: the LLM is writing its move`;
   $("undo").disabled = !history.length;
   showScore();                           // the score is part of the picture
 }
@@ -460,7 +621,9 @@ function showLatency() {
     $("latWho" + key).replaceChildren(colour === "w" ? "White" : "Black", Object.assign(document.createElement("small"), { textContent: kind === "you" ? "you" : nameOf(colour) }));
     $("latLast" + key).replaceChildren(...(last ? cell(last.ms, last.mla) : [kind === "you" ? "not timed" : "\u2013"]));
     $("latMean" + key).replaceChildren(...(last ? [...cell(mean((t) => t.ms), last.mla === null ? null : mean((t) => t.mla || 0)), ` \u00b7 ${mine.length} move${mine.length === 1 ? "" : "s"}`] : ["\u2013"]));
-    $("latCount" + key).textContent = last && last.decisions !== null ? `${last.decisions} last \u00b7 ${mean((t) => t.decisions || 0).toFixed(0)} average` : "\u2013";
+    // A model's move is so many decisions; the alpha-beta engine's, so many positions searched.
+    $("latCount" + key).textContent = last && last.decisions !== null ? `${last.decisions} last \u00b7 ${mean((t) => t.decisions || 0).toFixed(0)} average`
+      : last && last.nodes ? `${last.nodes.toLocaleString()} positions last \u00b7 ${Math.round(mean((t) => t.nodes || 0)).toLocaleString()} average` : "\u2013";
     if (last) average[colour] = mean((t) => t.ms);
   }
   const { w, b } = average;
@@ -522,7 +685,8 @@ async function loop() {
     let move;
     const started = performance.now(), before = stats.decisions, colour = game.turn(), mover = nameOf(colour);
     moveMla = 0;
-    try { move = who === "laya" ? await think(playing) : await llmMove(playing); } catch (error) {
+    lastSearch = null;
+    try { move = who === "laya" ? await think(playing) : who === "engine" ? await engineMove(playing) : await llmMove(playing); } catch (error) {
       if (error instanceof Stale) continue;
       if (error instanceof NotLoaded) { picker.lost(); break; }
       $("error").hidden = false; $("error").textContent = error.message;
@@ -531,7 +695,8 @@ async function loop() {
     }
     if (playing !== round) continue;
     timings.push({ ply: game.history().length + 1, colour, who: mover, ms: performance.now() - started,
-                   mla: who === "laya" ? moveMla : null, decisions: who === "laya" ? stats.decisions - before : null });
+                   mla: who === "laya" ? moveMla : null, decisions: who === "laya" ? stats.decisions - before : null,
+                   nodes: who === "engine" && lastSearch ? lastSearch.nodes : null });
     played(game.move(move));
     showStats();
     if (seats.w !== "you" && seats.b !== "you") await sleep(350);       // long enough to see each move land
@@ -589,6 +754,7 @@ for (const [id, colour] of [["white", "w"], ["black", "b"]]) {
     round++;                                   // whatever Laya was rating belongs to the old seating
     picked = considering = null;
     llm.reset(); llm.show(seats.w === "llm" || seats.b === "llm");
+    showEngine();
     buildBoard(); draw();
     loop();
   };
@@ -597,7 +763,12 @@ $("look").onchange = () => { $("lookNote").textContent = LOOK_NOTES[$("look").va
 $("lookNote").textContent = LOOK_NOTES[$("look").value] + REPEAT_NOTE;
 
 const llm = createLLMPlayer(document.querySelectorAll("main > section")[1]);
+llm.reads = "The reply is split into words, and the first word that is one of the legal moves is played, written either as in the list "
+  + "(Nf3, exd5, O-O) or as its two squares (g1f3). Check and mate marks and punctuation are ignored.";
 llm.show(seats.w === "llm" || seats.b === "llm");
+showEngine();
+$("depth").onchange = () => { try { localStorage.setItem("laya.chess.depth", $("depth").value); } catch (_) { /* not kept */ } };
+try { const kept = localStorage.getItem("laya.chess.depth"); if (["1", "2", "3", "4"].includes(kept)) $("depth").value = kept; } catch (_) { /* default */ }
 const picker = createModelPicker({ mount: $("picker"), madeFor: "chess", onReady: (loaded) => { draw(); if (loaded) loop(); else round++; } });
 picker.seats($("white"), $("black"));
 buildBoard(); draw(); showStats();
