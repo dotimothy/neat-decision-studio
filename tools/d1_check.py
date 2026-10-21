@@ -43,8 +43,9 @@ def compare(reference: dict, replies: list[dict]):
             continue
         usage = reply["usage"]
         seen = f", picture {usage['image_tokens']} positions in {usage['vision_ms']:.0f} ms" if usage["images"] else ""
+        shared = f", their first {usage['shared_tokens']} tokens read once" if usage.get("shared_tokens") else ""
         print(f"{case['name']}  ({usage['latency_ms']:.0f} ms: {usage['decisions']} questions in {usage['encoder_passes']} "
-              f"passes on the {usage['seq_len']}-token graph, {usage['mla_ms'] - usage['vision_ms']:.0f} ms{seen})")
+              f"passes on the {usage['seq_len']}-token graph, {usage['mla_ms'] - usage['vision_ms']:.0f} ms{shared}{seen})")
         for name, ref in case["answers"].items():
             mine, theirs = probabilities(reply["answers"][name]), probabilities(ref)
             best = lambda p: max(p, key=p.get)

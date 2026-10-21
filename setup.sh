@@ -19,7 +19,7 @@
 #                 "general dino", or "all". Unset: in a terminal, with no model on the board,
 #                 setup offers the list; otherwise models are downloaded later, on the app's
 #                 Models page or with `neat-decision --cli`.
-#   LAYA_HUB      the Hugging Face repository they come from (default: TDoSiMa/sima-laya)
+#   LAYA_HUB      the Hugging Face repository they come from (default: dotimothy/sima-laya)
 #   LAYA_MODELS_DIR   the directory the models are in, `model/` and `model-<name>/`; the same
 #                 as --models-dir
 #
@@ -32,7 +32,7 @@
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 models_dir="${LAYA_MODELS_DIR:-}"      # asked for now; else what was remembered; else this directory
-HUB="${LAYA_HUB:-TDoSiMa/sima-laya}"
+HUB="${LAYA_HUB:-dotimothy/sima-laya}"
 check=0
 runtime_only=0
 alias="${CREATE_ALIAS:-1}"

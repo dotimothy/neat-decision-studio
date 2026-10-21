@@ -23,6 +23,11 @@ from d1_sima.hostio import MASK_NEG
 IM_START, IM_END = "<|im_start|>", "<|im_end|>"
 IMAGE, IMAGE_START, IMAGE_END = "<image>", "<|image_start|>", "<|image_end|>"
 YES_FORMS, NO_FORMS = ("yes", "Yes", "YES"), ("no", "No", "NO")
+# How many copies of the shared part's last tokens lead a question that follows it (`tree`).
+# With 44, two for each of the model's convolution layers, a question comes out exactly as in a
+# row of its own; with 8 its logits differ by 0.0001, a thousandth of what quantizing the
+# weights changes, and with 2 by 0.02 (`tools/d1_lm_tree_check.py`).
+GHOSTS = 8
 LETTERS = [chr(ord("A") + i) for i in range(26)]
 
 
@@ -144,6 +149,79 @@ def layout(lengths: list[int], seq_len: int) -> dict:
         at += length
     return {"starts": starts, "mask": np.where(open_, 0.0, MASK_NEG).astype(np.float32).reshape(1, seq_len, 1, seq_len),
             "conv_back1": back1.reshape(1, 1, 1, seq_len), "conv_back2": back2.reshape(1, 1, 1, seq_len)}
+
+
+def common(rows: list[list[int]]) -> int:
+    """How many tokens the rows begin with alike, short of a row's last: a row needs a token of
+    its own to be read at."""
+    shared = 0
+    while shared < min(map(len, rows)) - 1 and len({row[shared] for row in rows}) == 1:
+        shared += 1
+    return shared
+
+
+def tree(trunk: int, branches: list[int], seq_len: int, ghosts: int = GHOSTS) -> dict:
+    """The layout that reads what several questions share once: a trunk of `trunk` tokens (the
+    picture and the state) and, after it, each question's own tokens as a branch.
+
+    A branch is to come out as if it followed the trunk directly. Attention makes that easy:
+    a branch token attends to the whole trunk and to its own branch before it, and is given
+    the position it would have there (`positions`; RoPE is an input of the graph for this).
+    The convolution is the difficulty, since it reads the two slots before a token whatever
+    they hold. So each branch is led by copies of the trunk's last `ghosts` tokens, placed
+    and attending as the tokens they copy, which nothing attends to. A copy's first layers
+    are wrong where its own two neighbours are missing, and the error moves two slots along
+    with every convolution: with two copies for each convolution layer of the model it never
+    reaches the branch, and it has faded to nothing that matters long before that (`GHOSTS`).
+    A trunk shorter than `ghosts` is copied whole, which is a row of its own.
+
+    Returns the graph inputs `mask` (1, key, 1, query), `conv_back1`, `conv_back2`
+    (1, 1, 1, S), and for each slot its `positions` and `source` (the trunk token a ghost
+    copies, else -1), where each branch's tokens start (`starts`) and how many ghosts lead it.
+    """
+    ghosts = min(trunk, ghosts)
+    need = trunk + sum(ghosts + length for length in branches)
+    if need > seq_len:
+        raise ValueError(f"{need} positions do not fit {seq_len}")
+    open_ = np.zeros((seq_len, seq_len), bool)                                        # [key, query]
+    back1, back2 = np.zeros(seq_len, np.float32), np.zeros(seq_len, np.float32)
+    positions, source = np.arange(seq_len), np.full(seq_len, -1)
+    row = np.arange(trunk)
+    open_[np.ix_(row, row)] = row[:, None] <= row[None, :]
+    back1[row[:-1]] = 1.0
+    back2[row[:-2]] = 1.0
+    starts, at = [], trunk
+    for length in branches:
+        for g in range(ghosts):                      # a copy of trunk token `of`, seeing what that token sees
+            of = trunk - ghosts + g
+            open_[:of + 1, at + g] = True
+            positions[at + g], source[at + g] = of, of
+        first = at + ghosts
+        own = np.arange(first, first + length)
+        open_[:trunk, own] = True
+        open_[np.ix_(own, own)] = own[:, None] <= own[None, :]
+        positions[own] = trunk + np.arange(length)
+        run = np.arange(at, first + length)
+        back1[run[:-1]] = 1.0
+        back2[run[:-2]] = 1.0
+        starts.append(first)
+        at = first + length
+    for slot in range(at, seq_len):
+        open_[slot, slot] = True
+    return {"starts": starts, "ghosts": ghosts, "positions": positions, "source": source,
+            "mask": np.where(open_, 0.0, MASK_NEG).astype(np.float32).reshape(1, seq_len, 1, seq_len),
+            "conv_back1": back1.reshape(1, 1, 1, seq_len), "conv_back2": back2.reshape(1, 1, 1, seq_len)}
+
+
+def rope(positions: np.ndarray, head_dim: int, theta: float) -> tuple[np.ndarray, np.ndarray]:
+    """The graph's `rope_cos` and `rope_sin` inputs, (1, head_dim, 1, S), for the position each
+    slot stands at. rotate_half(x) = cat(-x2, x1): the swap is done in the graph, the sign is
+    in the sine table."""
+    inv_freq = 1.0 / (theta ** (np.arange(0, head_dim, 2, dtype=np.float64) / head_dim))
+    angles = np.outer(inv_freq, np.asarray(positions, np.float64))                    # (half, S)
+    cos = np.concatenate([np.cos(angles), np.cos(angles)], axis=0)
+    sin = np.concatenate([-np.sin(angles), np.sin(angles)], axis=0)
+    return cos[None, :, None, :].astype(np.float32), sin[None, :, None, :].astype(np.float32)
 
 
 # ----------------------------------------------------------------------- the picture

@@ -1,5 +1,5 @@
-// d1-omni on the MLA: the trunk's chain of graphs, the vision tower, and the CPU work around
-// them. `d1_sima/hostio.py` is this file's reference, in numpy.
+// d1 on the MLA: the trunk's chain of graphs, the vision tower, and the CPU work around them.
+// `d1_sima/hostio.py` and, for d1-3B, `d1_sima/lmio.py` are this file's reference, in numpy.
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -92,6 +92,15 @@ Config load_config(const fs::path& path) {
     cfg.elfs[static_cast<uint32_t>(std::stoul(seq_len))] = files.get<std::vector<std::string>>();
   if (cfg.elfs.empty()) throw std::runtime_error("d1_config.json lists no compiled graphs");
   cfg.inputs = j.at("inputs").get<std::vector<std::vector<std::string>>>();
+  if (j.contains("rope") && !j.at("rope").is_null()) {
+    cfg.rope_dim = j.at("rope").at("head_dim");
+    cfg.rope_theta = j.at("rope").at("theta");
+    cfg.ghosts = j.value("ghosts", 8u);
+    if (!lm || !cfg.rope_dim || cfg.rope_dim % 2) throw std::runtime_error("d1_config.json: \"rope\" is the language model's, with an even head_dim");
+  }
+  for (const auto& graph : cfg.inputs)
+    if (std::count(graph.begin(), graph.end(), "rope_cos") && !cfg.rope_dim)
+      throw std::runtime_error("d1_config.json: a graph takes rope_cos, and \"rope\" does not say how to make it");
   for (const auto& [name, id] : j.at("tokens").items()) cfg.tokens[name] = id;
   const std::vector<const char*> needed = lm ? std::vector<const char*>{"bos", "im_start", "im_end", "image", "image_start", "image_end"}
                                              : std::vector<const char*>{"bos", "state", "q", "opt", "opt_end", "decide", "marker"};
@@ -409,8 +418,12 @@ struct Runtime::Chain {
   bool causal;
   std::vector<std::unique_ptr<llima::MLABuffer>> buffers;
   llima::MLABuffer mask, head_mask, conv_left, conv_right, type_add;
+  std::unique_ptr<llima::MLABuffer> rope_cos, rope_sin;   // lm: the rotation of each slot's position
+  size_t rope_dim;
+  double rope_theta;
   std::vector<std::unique_ptr<llima::MLAModelWithBuffer>> models;
   std::vector<std::pair<size_t, size_t>> masked_for;  // the rows (prefix, text) the masks currently hold
+  std::vector<size_t> laid_for;                       // lm: the layout they hold: shared, ghosts, each row's rest
 
   Chain(const fs::path& dir, const Config& cfg, uint32_t s, const std::vector<std::string>& elfs)
       : seq_len(s),
@@ -422,11 +435,21 @@ struct Runtime::Chain {
         // takes no input of one channel.
         conv_left(fmt::format("d1_conv_left_{}", s), {s, cfg.hidden_size}, "bfloat16", true),
         conv_right(fmt::format("d1_conv_right_{}", s), {s, cfg.hidden_size}, "bfloat16", true),
-        type_add(fmt::format("d1_type_add_{}", s), {s, cfg.hidden_size}, "bfloat16", true) {
+        type_add(fmt::format("d1_type_add_{}", s), {s, cfg.hidden_size}, "bfloat16", true),
+        rope_dim(cfg.rope_dim),
+        rope_theta(cfg.rope_theta) {
     if (cfg.inputs.size() != elfs.size()) throw std::runtime_error("d1_config.json: \"inputs\" does not match the graphs");
     for (auto* buffer : {&mask, &head_mask, &conv_left, &conv_right, &type_add}) {
       buffer->allocate();
       buffer->clear();
+    }
+    if (rope_dim) {
+      rope_cos = std::make_unique<llima::MLABuffer>(fmt::format("d1_rope_cos_{}", s), std::vector<size_t>{s, rope_dim}, "bfloat16", true);
+      rope_sin = std::make_unique<llima::MLABuffer>(fmt::format("d1_rope_sin_{}", s), std::vector<size_t>{s, rope_dim}, "bfloat16", true);
+      for (auto* buffer : {rope_cos.get(), rope_sin.get()}) {
+        buffer->allocate();
+        buffer->clear();
+      }
     }
     for (size_t i = 0; i <= elfs.size(); ++i) {
       // The last buffer is the scorer's output, one value a position, or for the language
@@ -442,7 +465,8 @@ struct Runtime::Chain {
       for (const std::string& name : cfg.inputs[i]) {
         llima::MLABuffer* buffer = name == "hidden_in" ? buffers[i].get() : name == "mask" ? &mask
             : name == "head_mask" ? &head_mask : name == "conv_left" || name == "conv_back1" ? &conv_left
-            : name == "conv_right" || name == "conv_back2" ? &conv_right : name == "type_add" ? &type_add : nullptr;
+            : name == "conv_right" || name == "conv_back2" ? &conv_right : name == "type_add" ? &type_add
+            : name == "rope_cos" ? rope_cos.get() : name == "rope_sin" ? rope_sin.get() : nullptr;
         if (!buffer) throw std::runtime_error("d1_config.json names a graph input this runtime does not know: " + name);
         inputs.emplace_back(buffer);
       }
@@ -467,23 +491,6 @@ struct Runtime::Chain {
     std::vector<uint16_t> trunk(s * s, closed), head(s * s, closed), left(s * width, zero), right(s * width, zero);
     for (size_t pos = 0; pos < s; ++pos) trunk[pos * s + pos] = head[pos * s + pos] = open;
     size_t start = 0;
-    if (causal) {
-      // The language model: a query sees the keys of its own row at or before it, and the two
-      // taps that look back (one position, `left` here, and two, `right`) stop at a row's start.
-      for (const auto& [prefix, text] : rows) {
-        const size_t end = start + prefix + text;
-        for (size_t query = start; query < end; ++query)
-          for (size_t key = start; key <= query; ++key) trunk[query * s + key] = open;
-        for (size_t pos = start; pos + 1 < end; ++pos) std::fill_n(left.begin() + pos * width, width, one);
-        for (size_t pos = start; pos + 2 < end; ++pos) std::fill_n(right.begin() + pos * width, width, one);
-        start = end;
-      }
-      mask.upload(trunk.data());
-      conv_left.upload(left.data());
-      conv_right.upload(right.data());
-      masked_for = rows;
-      return;
-    }
     for (const auto& [prefix, text] : rows) {
       const size_t words = start + prefix, end = words + text;
       for (size_t query = start; query < words; ++query)
@@ -502,6 +509,71 @@ struct Runtime::Chain {
     conv_left.upload(left.data());
     conv_right.upload(right.data());
     masked_for = rows;
+  }
+
+  // The language model's layout (`d1_sima.lmio.tree`): `shared` tokens the rows begin with
+  // alike, then each row's rest (`branches`) behind `ghosts` copies of the shared part's last
+  // tokens. A query sees the shared part and its own row before it; a copy sees what the token
+  // it copies sees, and nothing sees a copy. The two taps that look back (one slot, `conv_left`
+  // here, and two, `conv_right`) run from a branch's first copy to its last token and stop
+  // there. A slot's position is the one its token would have in its row alone. With nothing
+  // shared this is rows laid end to end.
+  void lay(size_t shared, size_t ghosts, const std::vector<size_t>& branches) {
+    std::vector<size_t> key{shared, ghosts};
+    key.insert(key.end(), branches.begin(), branches.end());
+    if (key == laid_for) return;
+    const uint16_t open = to_bf16(0.0f), closed = to_bf16(kMaskNeg), one = to_bf16(1.0f), zero = to_bf16(0.0f);
+    const size_t s = seq_len;
+    std::vector<uint16_t> trunk(s * s, closed), back1(s * width, zero), back2(s * width, zero);
+    std::vector<size_t> position(s);
+    for (size_t slot = 0; slot < s; ++slot) {
+      trunk[slot * s + slot] = open;
+      position[slot] = slot;
+    }
+    const auto run = [&](size_t start, size_t end) {
+      for (size_t slot = start; slot + 1 < end; ++slot) std::fill_n(back1.begin() + slot * width, width, one);
+      for (size_t slot = start; slot + 2 < end; ++slot) std::fill_n(back2.begin() + slot * width, width, one);
+    };
+    for (size_t query = 0; query < shared; ++query) std::fill_n(trunk.begin() + query * s, query + 1, open);
+    run(0, shared);
+    size_t at = shared;
+    for (size_t length : branches) {
+      for (size_t g = 0; g < ghosts; ++g) {
+        const size_t of = shared - ghosts + g, slot = at + g;
+        trunk[slot * s + slot] = closed;
+        std::fill_n(trunk.begin() + slot * s, of + 1, open);
+        position[slot] = of;
+      }
+      const size_t first = at + ghosts;
+      for (size_t i = 0; i < length; ++i) {
+        std::fill_n(trunk.begin() + (first + i) * s, shared, open);
+        std::fill_n(trunk.begin() + (first + i) * s + first, i + 1, open);
+        position[first + i] = shared + i;
+      }
+      run(at, first + length);
+      at = first + length;
+    }
+    mask.upload(trunk.data());
+    conv_left.upload(back1.data());
+    conv_right.upload(back2.data());
+    if (rope_dim) {
+      // rotate_half(x) = cat(-x2, x1): the graph does the swap, the sign is in the sine table.
+      const size_t half = rope_dim / 2;
+      std::vector<double> frequency(half);
+      for (size_t d = 0; d < half; ++d) frequency[d] = std::pow(rope_theta, -double(2 * d) / double(rope_dim));
+      std::vector<uint16_t> cos(s * rope_dim), sin(s * rope_dim);
+      for (size_t slot = 0; slot < s; ++slot) {
+        for (size_t d = 0; d < half; ++d) {
+          const double angle = double(position[slot]) * frequency[d];
+          cos[slot * rope_dim + d] = cos[slot * rope_dim + half + d] = to_bf16(static_cast<float>(std::cos(angle)));
+          sin[slot * rope_dim + d] = to_bf16(static_cast<float>(-std::sin(angle)));
+          sin[slot * rope_dim + half + d] = to_bf16(static_cast<float>(std::sin(angle)));
+        }
+      }
+      rope_cos->upload(cos.data());
+      rope_sin->upload(sin.data());
+    }
+    laid_for = key;
   }
 };
 
@@ -795,13 +867,94 @@ std::vector<uint16_t> Runtime::see(const Picture& picture, Cost& cost) {
   return prefix;
 }
 
+// The language model's pass: its rows' pictures are inside them, in the places of their
+// `<image>` tokens, and the answer is read off the final hidden state at a row's last token.
+std::vector<std::vector<float>> Runtime::pass_lm(const std::vector<const Row*>& rows, const std::vector<uint16_t>& pictures, Cost& cost,
+                                                 uint32_t seq_len, size_t shared) {
+  const uint32_t width = _cfg.hidden_size, image = _cfg.tokens.at("image");
+  if (shared && !shares()) throw std::invalid_argument("these graphs stand a row at its slots' positions: nothing can be shared");
+  const size_t ghosts = std::min<size_t>(shared, _cfg.ghosts);
+  size_t total = shared;
+  std::vector<size_t> branches;
+  for (const Row* row : rows) {
+    if (row->ids.size() <= shared) throw std::invalid_argument("a row to read has nothing of its own");
+    if (!std::equal(rows.front()->ids.begin(), rows.front()->ids.begin() + shared, row->ids.begin()))
+      throw std::invalid_argument("the rows do not begin alike");
+    branches.push_back(row->ids.size() - shared);
+    total += ghosts + branches.back();
+  }
+  const auto found = seq_len ? _chains.find(seq_len) : _chains.lower_bound(static_cast<uint32_t>(total));
+  if (found == _chains.end() || total > found->first)
+    throw std::invalid_argument(seq_len ? fmt::format("{} positions do not fit a loaded {}-token chain", total, seq_len)
+                                        : fmt::format("{} positions exceed the longest loaded chain ({})", total, max_tokens()));
+  Chain& chain = *found->second;
+
+  auto stage = Clock::now();
+  llima::MLABuffer& first = *chain.buffers.front();
+  auto* hidden = static_cast<uint16_t*>(first.get_virtual_addr());
+  // A token's embedding, or for an `<image>` token the next of the pictures' (`seen` so far).
+  const auto place = [&](size_t slot, uint32_t id, size_t& seen) {
+    if (id >= _cfg.vocab_size) throw std::invalid_argument(fmt::format("token id {} out of range", id));
+    if (id == image && !pictures.empty()) {
+      if ((seen + 1) * width > pictures.size()) throw std::invalid_argument("a row has more picture positions than there are picture embeddings");
+      std::memcpy(hidden + slot * width, pictures.data() + seen++ * width, width * sizeof(uint16_t));
+    } else {
+      std::memcpy(hidden + slot * width, _embeddings + size_t(id) * width, width * sizeof(uint16_t));
+    }
+  };
+  size_t seen_shared = 0, at = shared;
+  for (size_t i = 0; i < shared; ++i) place(i, rows.front()->ids[i], seen_shared);
+  std::vector<size_t> ends;      // where each row's last token is
+  for (const Row* row : rows) {
+    std::memcpy(hidden + at * width, hidden + (shared - ghosts) * width, ghosts * width * sizeof(uint16_t));
+    at += ghosts;
+    size_t seen = seen_shared;
+    for (size_t i = shared; i < row->ids.size(); ++i) place(at++, row->ids[i], seen);
+    ends.push_back(at - 1);
+  }
+  // What is left of the last pass must not reach this one through a cut tap as a NaN times 0.
+  std::memset(hidden + at * width, 0, (chain.seq_len - at) * width * sizeof(uint16_t));
+  first.flush_cache();
+  chain.lay(shared, ghosts, branches);
+  cost.pre_ms += elapsed_ms(stage);
+
+  stage = Clock::now();
+  for (auto& model : chain.models) model->run();
+  cost.mla_ms += elapsed_ms(stage);
+  cost.passes++;
+  cost.seq_len = std::max(cost.seq_len, chain.seq_len);
+  cost.shared = std::max(cost.shared, shared);
+
+  // An option's logit: the final hidden state against the embedding of each token that spells
+  // the option, the best of them. (The embedding table is the language model's output layer too.)
+  const llima::MLABuffer& last = *chain.buffers.back();
+  last.invalidate_cache();
+  const auto* out = static_cast<const uint16_t*>(last.get_virtual_addr());
+  std::vector<std::vector<float>> result;
+  std::vector<float> state(width);
+  for (size_t r = 0; r < rows.size(); ++r) {
+    std::transform(out + ends[r] * width, out + (ends[r] + 1) * width, state.begin(), from_bf16);
+    result.emplace_back();
+    for (const auto& group : rows[r]->readout) {
+      double best = -1e30;
+      for (uint32_t id : group) {
+        const uint16_t* weights = _embeddings + size_t(id) * width;
+        double logit = 0;
+        for (size_t c = 0; c < width; ++c) logit += double(from_bf16(weights[c])) * state[c];
+        best = std::max(best, logit);
+      }
+      result.back().push_back(static_cast<float>(best));
+    }
+  }
+  return result;
+}
+
 std::vector<std::vector<float>> Runtime::pass(const std::vector<const Row*>& rows, const std::vector<uint16_t>& prefix, Cost& cost,
-                                              uint32_t seq_len) {
+                                              uint32_t seq_len, size_t shared) {
+  if (_cfg.family == "lm") return pass_lm(rows, prefix, cost, seq_len, shared);
+  if (shared) throw std::invalid_argument("d1-omni reads a row in both directions: nothing of it can be shared");
   const uint32_t width = _cfg.hidden_size;
-  const bool lm = _cfg.family == "lm";
-  // The language model's pictures are inside its rows, in the places of their `<image>` tokens.
-  const size_t lead = lm ? 0 : prefix.size() / width;
-  const uint32_t image = lm ? _cfg.tokens.at("image") : 0;
+  const size_t lead = prefix.size() / width;
   size_t total = 0;
   std::vector<std::pair<size_t, size_t>> sizes;
   for (const Row* row : rows) {
@@ -823,19 +976,13 @@ std::vector<std::vector<float>> Runtime::pass(const std::vector<const Row*>& row
   size_t pos = 0;
   for (const Row* row : rows) {
     const auto type = _cfg.question_types.find(row->type);
-    if (!lm && type == _cfg.question_types.end()) throw std::invalid_argument("unknown question type: " + row->type);
+    if (type == _cfg.question_types.end()) throw std::invalid_argument("unknown question type: " + row->type);
     if (lead) std::memcpy(hidden + pos * width, prefix.data(), prefix.size() * sizeof(uint16_t));
     pos += lead;
-    size_t seen = 0;           // lm: how many of the pictures' embeddings this row has taken
     for (uint32_t id : row->ids) {
       if (id >= _cfg.vocab_size) throw std::invalid_argument(fmt::format("token id {} out of range", id));
-      if (lm && id == image && !prefix.empty()) {
-        if ((seen + 1) * width > prefix.size()) throw std::invalid_argument("a row has more picture positions than there are picture embeddings");
-        std::memcpy(hidden + pos * width, prefix.data() + seen++ * width, width * sizeof(uint16_t));
-      } else {
-        std::memcpy(hidden + pos * width, _embeddings + size_t(id) * width, width * sizeof(uint16_t));
-      }
-      if (!lm) std::memcpy(types + pos * width, _type_embeddings[type->second].data(), width * sizeof(uint16_t));
+      std::memcpy(hidden + pos * width, _embeddings + size_t(id) * width, width * sizeof(uint16_t));
+      std::memcpy(types + pos * width, _type_embeddings[type->second].data(), width * sizeof(uint16_t));
       ++pos;
     }
   }
@@ -852,35 +999,9 @@ std::vector<std::vector<float>> Runtime::pass(const std::vector<const Row*>& row
   cost.passes++;
   cost.seq_len = std::max(cost.seq_len, chain.seq_len);
 
-  std::vector<std::vector<float>> result;
-  if (lm) {
-    // An option's logit: the final hidden state at the row's last token against the embedding
-    // of each token that spells the option, the best of them. (The embedding table is the
-    // language model's output layer too.)
-    const llima::MLABuffer& last = *chain.buffers.back();
-    last.invalidate_cache();
-    const auto* out = static_cast<const uint16_t*>(last.get_virtual_addr());
-    std::vector<float> state(width);
-    size_t end = 0;
-    for (const Row* row : rows) {
-      end += row->ids.size();
-      std::transform(out + (end - 1) * width, out + end * width, state.begin(), from_bf16);
-      result.emplace_back();
-      for (const auto& group : row->readout) {
-        double best = -1e30;
-        for (uint32_t id : group) {
-          const uint16_t* weights = _embeddings + size_t(id) * width;
-          double logit = 0;
-          for (size_t c = 0; c < width; ++c) logit += double(from_bf16(weights[c])) * state[c];
-          best = std::max(best, logit);
-        }
-        result.back().push_back(static_cast<float>(best));
-      }
-    }
-    return result;
-  }
   // Downloaded, not read in place: a buffer of one channel is laid out on the MLA with its
   // channels padded out, and `download` is what undoes that.
+  std::vector<std::vector<float>> result;
   std::vector<uint16_t> scores(chain.seq_len);
   chain.buffers.back()->download(scores.data());
   size_t start = 0;
@@ -949,35 +1070,70 @@ json Runtime::predict(const json& state, const json& questions, const std::vecto
   }
   cost.tokenize_ms = elapsed_ms(stage);
 
-  // Rows laid end to end, in as few passes as they fit, unless a pass each on shorter chains
-  // is measured to be quicker.
+  // What the language model's rows begin with alike, the picture and the state, can be read
+  // once a pass (never a row's last token: a row needs something of its own to be read at).
+  size_t common = 0;
+  if (lm && shares() && rows.size() > 1) {
+    size_t shortest = rows.front().ids.size();
+    for (const Row& row : rows) shortest = std::min(shortest, row.ids.size());
+    const auto alike = [&](size_t at) {
+      return std::all_of(rows.begin(), rows.end(), [&](const Row& row) { return row.ids[at] == rows.front().ids[at]; });
+    };
+    while (common + 1 < shortest && alike(common)) ++common;
+  }
+
+  // The rows go in passes: laid end to end, or behind what they share, on a chain of each
+  // loaded length, or a pass each. Whichever is measured to take the least time is used.
   const auto price = [&](size_t positions) {
     const auto chain = _chains.lower_bound(static_cast<uint32_t>(positions));
     const auto measured = _pass_ms.find(chain->first);
     return measured == _pass_ms.end() ? double(chain->first) : measured->second;
   };
-  std::vector<std::vector<size_t>> bins;
-  std::vector<size_t> used;
-  double packed_price = 0, single_price = 0;
+  struct Plan {
+    std::vector<std::vector<size_t>> bins;
+    size_t shared = 0;
+    double price = 0;
+  };
+  // Rows behind `shared` tokens, in passes of at most `capacity` positions; nothing if a row
+  // does not fit one.
+  const auto pack = [&](size_t shared, size_t capacity) -> std::optional<Plan> {
+    const size_t ghosts = std::min<size_t>(shared, _cfg.ghosts);
+    Plan plan;
+    plan.shared = shared;
+    std::vector<size_t> used;
+    for (size_t i = 0; i < rows.size(); ++i) {
+      const size_t need = lead + ghosts + rows[i].ids.size() - shared;
+      size_t bin = 0;
+      while (bin < plan.bins.size() && used[bin] + need > capacity) ++bin;
+      if (bin == plan.bins.size()) {
+        if (shared + need > capacity) return std::nullopt;
+        plan.bins.emplace_back();
+        used.push_back(shared);
+      }
+      plan.bins[bin].push_back(i);
+      used[bin] += need;
+    }
+    // A row that ends up in a pass by itself is read as a row alone.
+    for (size_t bin = 0; bin < plan.bins.size(); ++bin)
+      plan.price += price(plan.bins[bin].size() == 1 ? lead + rows[plan.bins[bin].front()].ids.size() : used[bin]);
+    return plan;
+  };
+  Plan plan;
   for (size_t i = 0; i < rows.size(); ++i) {
-    const size_t need = lead + rows[i].ids.size();
-    single_price += price(need);
-    size_t bin = 0;
-    while (bin < bins.size() && used[bin] + need > max_tokens()) ++bin;
-    if (bin == bins.size()) { bins.emplace_back(); used.push_back(0); }
-    bins[bin].push_back(i);
-    used[bin] += need;
+    plan.bins.push_back({i});
+    plan.price += price(lead + rows[i].ids.size());
   }
-  for (size_t positions : used) packed_price += price(positions);
-  if (single_price < packed_price) {
-    bins.clear();
-    for (size_t i = 0; i < rows.size(); ++i) bins.push_back({i});
+  for (const auto& [capacity, chain] : _chains) {
+    for (size_t shared : common ? std::vector<size_t>{0, common} : std::vector<size_t>{0}) {
+      const auto packed = pack(shared, capacity);
+      if (packed && packed->price <= plan.price) plan = *packed;
+    }
   }
   std::vector<std::vector<float>> scores(rows.size());
-  for (const auto& bin : bins) {
+  for (const auto& bin : plan.bins) {
     std::vector<const Row*> together;
     for (size_t i : bin) together.push_back(&rows[i]);
-    const auto out = pass(together, prefix, cost);
+    const auto out = pass(together, prefix, cost, 0, bin.size() > 1 ? plan.shared : 0);
     for (size_t k = 0; k < bin.size(); ++k) scores[bin[k]] = out[k];
   }
 
@@ -1048,6 +1204,7 @@ json Runtime::predict(const json& state, const json& questions, const std::vecto
         {"images", cost.pictures},
         {"images_cached", cost.pictures_cached},
         {"image_tokens", cost.prefix},
+        {"shared_tokens", cost.shared},
         {"tokenize_ms", ms(cost.tokenize_ms)},
         {"pre_ms", ms(cost.pre_ms)},
         {"vision_ms", ms(cost.vision_ms)},

@@ -282,7 +282,7 @@
                        + (remote.have_bytes && !downloading ? `, ${mb(remote.have_bytes)} of it already here` : ""));
     if (remote && hub?.repo) {
       const upstream = /^[\w.-]+\/[\w.-]+$/.test(remote.card?.upstream || "") ? remote.card.upstream : null;
-      fact("Source", el("a", { href: `${hub.page}/tree/main/${remote.path}`, target: "_blank", rel: "noopener", textContent: `${hub.repo}/${remote.path}` }),
+      fact("Source", el("a", { href: `https://huggingface.co/${remote.repo || hub.repo}/tree/main/${remote.path}`, target: "_blank", rel: "noopener", textContent: `${remote.repo || hub.repo}/${remote.path}` }),
         ...(upstream ? [", compiled from ", el("a", { href: `https://huggingface.co/${upstream}`, target: "_blank", rel: "noopener", textContent: upstream })] : []),
         remote.card?.license ? ` (${remote.card.license})` : "");
     } else {

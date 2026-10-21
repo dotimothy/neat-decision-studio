@@ -9,7 +9,8 @@ Every reference case is asked again through the ONNX graphs, in fp32, with every
 will do on its CPU done by `d1_sima.lmio` and `d1_sima.hostio`. What is compared: each
 question's token ids and the tokens its answer is read from, with the checkpoint's own; a
 picture's patches with the processor's; and each question's probabilities, a question alone in
-a pass and, for text, a case's questions laid end to end in one.
+a pass, a case's questions laid end to end in one (text only: a picture's rows do not fit) and
+its questions behind what they begin with alike, the picture and the state, read once.
 """
 import argparse
 import json
@@ -36,7 +37,7 @@ def main():
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--reference", type=Path, required=True)
     ap.add_argument("--images", type=Path, default=Path("build/d1_omni_reference/images"))
-    ap.add_argument("--seq_lens", default="128,512")
+    ap.add_argument("--seq_lens", default="128,384,512")
     ap.add_argument("--layers_per_graph", type=int, default=4)
     ap.add_argument("--patches", type=int, default=hostio.MAX_PATCHES)
     ap.add_argument("--cases", default="", help="only these cases, by name")
@@ -80,26 +81,33 @@ def main():
         feeds = hostio.projector_inputs(merged, args.patches // hostio.MERGE ** 2, [i.name for i in projector.get_inputs()])
         return projector.run(None, feeds)[0][0, :, 0, :len(merged)].T
 
-    def ask(rows: list[tuple[list[int], np.ndarray | None]]) -> list[np.ndarray]:
-        """Rows (ids, the picture's embeddings) laid end to end in one pass: each row's final hidden state."""
-        lengths = [len(ids) for ids, _ in rows]
-        seq_len = next(s for s in seq_lens if s >= sum(lengths))
+    def ask(rows: list[tuple[list[int], np.ndarray | None]], shared: int = 0) -> list[np.ndarray]:
+        """Rows (ids, the picture's embeddings) in one pass, laid end to end or, with `shared`,
+        behind their first `shared` tokens read once: each row's final hidden state."""
+        ghosts = min(shared, lmio.GHOSTS)
+        branches = [len(ids) - shared for ids, _ in rows]
+        seq_len = next(s for s in seq_lens if s >= shared + sum(ghosts + n for n in branches))
         if seq_len not in chains:
             chains[seq_len] = [session(trunk_name(seq_len, first, count)) for first, count in graphs]
-        plan = lmio.layout(lengths, seq_len)
-        hidden = np.zeros((1, cfg.hidden_size, 1, seq_len), np.float32)
+        plan = lmio.tree(shared, branches, seq_len, ghosts)
+        slots = np.zeros((seq_len, cfg.hidden_size), np.float32)
         for start, (ids, seen) in zip(plan["starts"], rows):
             row = embeddings[ids].copy()
             if seen is not None:
                 row[np.array(ids) == image_id] = seen
-            hidden[0, :, 0, start:start + len(ids)] = row.T
+            slots[:shared] = row[:shared]
+            slots[start:start + len(ids) - shared] = row[shared:]
+        ghost = plan["source"] >= 0
+        slots[ghost] = slots[plan["source"][ghost]]
+        hidden = np.ascontiguousarray(slots.T)[None, :, None, :]
+        cos, sin = lmio.rope(plan["positions"], cfg.head_dim, cfg.rope_theta)
         feeds = {"mask": plan["mask"], "conv_back1": hostio.wide(plan["conv_back1"], cfg.hidden_size),
-                 "conv_back2": hostio.wide(plan["conv_back2"], cfg.hidden_size)}
+                 "conv_back2": hostio.wide(plan["conv_back2"], cfg.hidden_size), "rope_cos": cos, "rope_sin": sin}
         for run, wanted in zip(chains[seq_len], names):
             hidden = run.run(None, {"hidden_in": hidden, **{n: feeds[n] for n in wanted if n != "hidden_in"}})[0]
-        return [hidden[0, :, 0, start + length - 1] for start, length in zip(plan["starts"], lengths)]
+        return [hidden[0, :, 0, start + n - 1] for start, n in zip(plan["starts"], branches)]
 
-    worst = {"alone": 0.0, "packed": 0.0}
+    worst = {"alone": 0.0, "packed": 0.0, "shared": 0.0}
     flipped = 0
     wanted_cases = set(filter(None, args.cases.split(",")))
     for case in reference["cases"]:
@@ -120,6 +128,10 @@ def main():
         passes = {"alone": [ask([row])[0] for row in rows]}
         if seen is None and len(rows) > 1 and sum(len(r[0]) for r in rows) <= seq_lens[-1]:
             passes["packed"] = ask(rows)
+        shared = lmio.common([ids for ids, _ in rows]) if len(rows) > 1 else 0
+        if shared and shared + sum(min(shared, lmio.GHOSTS) + len(ids) - shared for ids, _ in rows) <= seq_lens[-1]:
+            print(f"      the rows share their first {shared} tokens")
+            passes["shared"] = ask(rows, shared)
         for way, finals in passes.items():
             for (name, question), final in zip(case["questions"].items(), finals):
                 logits = [max(float(embeddings[i] @ final) for i in group) for group in lmio.readout_ids(readout, question)]
@@ -129,7 +141,8 @@ def main():
                 same = np.argmax(probabilities(mine)) == np.argmax(probabilities(theirs))
                 flipped += not same
                 print(f"      {way:6s} {name:10s} max probability diff {diff:.5f}{'' if same else '   DECISION DIFFERS'}")
-    print(f"worst probability difference: alone {worst['alone']:.5f}, packed {worst['packed']:.5f}; {flipped} decisions differ")
+    print(f"worst probability difference: alone {worst['alone']:.5f}, packed {worst['packed']:.5f}, "
+          f"shared {worst['shared']:.5f}; {flipped} decisions differ")
     return 1 if flipped or max(worst.values()) > 0.02 else 0
 
 

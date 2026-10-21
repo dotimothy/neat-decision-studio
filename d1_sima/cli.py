@@ -1,7 +1,7 @@
 """d1-compile: LiquidAI's d1 models -> MLA ELFs, in the passes `llima-compile` uses.
 
     d1-compile models/d1-omni-600m -o build/d1-omni --seq_lens 128,512
-    d1-compile models/d1-3b -o build/d1-3b --seq_lens 128,512 --layers_per_graph 4
+    d1-compile models/d1-3b -o build/d1-3b --seq_lens 128,384,512 --layers_per_graph 4
 
 Three kinds of graph come out. The trunk's layers and the decision head are a chain of graphs
 of `--layers_per_graph` layers a sequence length (all of them in one graph by default: the
@@ -170,6 +170,9 @@ def gen_devkit_files(cfg: D1Config, model_path: Path, output: Path, seq_lens: li
             "kind": "d1", "family": "lm", "model": "d1-3B", "precision": precision.value,
             "hidden_size": cfg.hidden_size, "vocab_size": cfg.vocab_size, "num_hidden_layers": cfg.num_hidden_layers,
             "elfs": chains, "inputs": inputs, "vision": vision,
+            # The graphs take each slot's position as an input, so that what several questions
+            # begin with can be read once (`lmio.tree`): how the board makes that input.
+            "rope": {"head_dim": cfg.head_dim, "theta": cfg.rope_theta}, "ghosts": lmio.GHOSTS,
             "token_embeddings": "token_embeddings.bf16", "tokenizer": "tokenizer.json",
             "tokens": {"bos": raw["text_config"]["bos_token_id"], **tokens},
             "readout": lmio.readout_table(lambda text: tokenizer.encode(text, add_special_tokens=False).ids),

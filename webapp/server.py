@@ -814,6 +814,7 @@ class Hub:
 
     REFRESH = 300                    # seconds a fetched list is good for
     NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
+    REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}/[A-Za-z0-9][A-Za-z0-9_.-]{0,95}")
     FILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}")
     SPARE = 1 << 30                  # disk left free after a download
 
@@ -829,8 +830,8 @@ class Hub:
         self._failed: dict[str, str] = {}    # model -> why its last download stopped
         self.quiet = False                   # no log lines: the caller reports (`--fetch`)
 
-    def _url(self, path: str) -> str:
-        return f"https://huggingface.co/{self.repo}/resolve/main/{path}"
+    def _url(self, path: str, repo: str | None = None) -> str:
+        return f"https://huggingface.co/{repo or self.repo}/resolve/main/{path}"
 
     def directory(self, name: str) -> Path:
         return self.root / ("model" if name == "general" else f"model-{name}")
@@ -841,12 +842,15 @@ class Hub:
             with urllib.request.urlopen(request, timeout=15) as response:
                 document = json.loads(response.read(1 << 20))
             # "models_v2" holds the kinds of model an app from before them would not know
-            # (CLM); such an app reads "models" alone and goes on working.
-            listed = {**document["models"], **document.get("models_v2", {})}
+            # (CLM), and "models_v3" those after that (d1) and those published in a
+            # repository of their own (CLM now, and d1), whose entry names it; an app from
+            # before them reads the lists it knows and goes on working.
+            listed = {**document["models"], **document.get("models_v2", {}), **document.get("models_v3", {})}
             models = {}
             for name, entry in listed.items():
                 files = entry["files"]
                 if not (self.NAME.fullmatch(name) and self.NAME.fullmatch(entry["path"])
+                        and ("repo" not in entry or isinstance(entry["repo"], str) and self.REPO.fullmatch(entry["repo"]))
                         and all(self.FILE.fullmatch(file["name"]) and isinstance(file["bytes"], int)
                                 and re.fullmatch(r"[0-9a-f]{64}", file["sha256"]) for file in files)
                         and any(file["name"] in CONFIGS.values() for file in files)):
@@ -889,7 +893,7 @@ class Hub:
             models[name] = {
                 "title": entry.get("title", name), "about": entry.get("about", ""),
                 "precision": entry.get("precision"), "agreement": entry.get("agreement"),
-                "path": entry["path"],
+                "path": entry["path"], "repo": entry.get("repo", self.repo),
                 "card": {key: value for key, value in entry.get("card", {}).items() if isinstance(value, str)},
                 "bytes": total, "have_bytes": 0 if downloading else self._have(name, entry),
                 # A graph is one file (Laya) or a chain of them (CLM).
@@ -959,22 +963,22 @@ class Hub:
                     job["done"] += file["bytes"]
                     continue
                 job["file"] = file["name"]
-                self._fetch(job, f"{entry['path']}/{file['name']}", target, file)
+                self._fetch(job, self._url(f"{entry['path']}/{file['name']}", entry.get("repo")), target, file)
             model = Model(name, str(directory), self._laya, None if name == "dino" else self._allowed)
             self._manager.add(model)
             if not self.quiet:
-                print(f"{time.strftime('%H:%M:%S')} downloaded {name} from {self.repo}", flush=True)
+                print(f"{time.strftime('%H:%M:%S')} downloaded {name} from {entry.get('repo', self.repo)}", flush=True)
         except Cancelled:
             self._failed[name] = "The download was cancelled. What had arrived is kept, and the next one continues from there."
         except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
             self._failed[name] = f"The download stopped: {error}"
             print(f"{time.strftime('%H:%M:%S')} download of {name} failed: {error}", flush=True)
 
-    def _fetch(self, job: dict, path: str, target: Path, file: dict):
+    def _fetch(self, job: dict, url: str, target: Path, file: dict):
         """One file, to `<name>.part` and then into place once its size and sum are right."""
         part = target.with_name(target.name + ".part")
         digest, size = hashlib.sha256(), 0
-        request = urllib.request.Request(self._url(path), headers={"User-Agent": "neat-decision-studio"})
+        request = urllib.request.Request(url, headers={"User-Agent": "neat-decision-studio"})
         try:
             with urllib.request.urlopen(request, timeout=60) as response, part.open("wb") as out:
                 unsynced = 0
@@ -1471,17 +1475,17 @@ def make_handler(manager: ModelManager, hub: Hub | None, llm: LLM | None = None,
     return Handler
 
 
-def load_shown(manager: ModelManager, name: str):
+def load_shown(manager: ModelManager, name: str, seq_lens: list[int] | None = None):
     """Load a model, drawing its progress in the terminal: a spinner, a bar in the Neat
     colours and the stage it is at. The stages are the ones the Models page shows. Without a
     terminal the load is silent, as a log should be."""
     if not sys.stdout.isatty() or os.environ.get("NO_COLOR") is not None or os.environ.get("TERM") == "dumb":
-        return manager.load(name)
+        return manager.load(name, seq_lens)
     failure = []
 
     def work():
         try:
-            manager.load(name)
+            manager.load(name, seq_lens)
         except (RuntimeDied, Refused, OSError) as error:
             failure.append(error)
 
@@ -1604,8 +1608,9 @@ def main():
                     help="another question model (repeatable)")
     ap.add_argument("--preload", default="general", metavar="NAME",
                     help="the model to load at startup, several separated by commas, or 'none' "
-                         "(default: %(default)s). More are loaded, beside it, in Settings.")
-    ap.add_argument("--hub", default="TDoSiMa/sima-laya", metavar="REPO",
+                         "(default: %(default)s). NAME:128+384 loads those of its sequence lengths "
+                         "and not its usual ones. More are loaded, beside it, in Settings.")
+    ap.add_argument("--hub", default="dotimothy/sima-laya", metavar="REPO",
                     help="Hugging Face repository the Models page offers downloads from, or 'none' "
                          "(default: %(default)s)")
     ap.add_argument("--root", "--models-dir", dest="root", metavar="DIR",
@@ -1661,11 +1666,14 @@ def main():
     if preload == ["general"] and "general" not in manager.models:
         print("laya webapp: the general model is not on this board; starting with nothing loaded", flush=True)
         preload = []
-    for name in preload:
+    for item in preload:
+        name, _, lengths = item.partition(":")        # NAME, or NAME:128+384 for those chains of it
         if name not in manager.models:
             sys.exit(f"laya webapp: --preload names {name!r}, which is not one of {list(sources)}")
+        if lengths and not all(part.isdigit() for part in lengths.split("+")):
+            sys.exit(f"laya webapp: --preload {item!r}: the sequence lengths go as {name}:128+384")
         try:
-            load_shown(manager, name)
+            load_shown(manager, name, [int(part) for part in lengths.split("+")] if lengths else None)
         except (RuntimeDied, Refused, OSError) as error:
             manager.stop()
             sys.exit(f"laya webapp: cannot load the {name} model: {error}")

@@ -7,9 +7,10 @@
 #                                (default: all of them)
 #   ./run.sh --preload NAME      the model to put on the MLA at startup, or "none" (default:
 #                                general). One model is loaded at a time; another is loaded
-#                                in its place from the pages.
+#                                in its place from the pages. NAME:128+384 loads those of the
+#                                model's sequence lengths and not its usual ones.
 #   ./run.sh --hub REPO          the Hugging Face repository the Models page downloads compiled
-#                                models from, or "none" (default: TDoSiMa/sima-laya)
+#                                models from, or "none" (default: dotimothy/sima-laya)
 #   ./run.sh --llm URL           an OpenAI-compatible chat server the games can set Laya against,
 #                                or "none" (default: NEAT GenAI Studio's, http://127.0.0.1:9998)
 #   ./run.sh --no-https          serve HTTP alone. By default the app serves HTTPS too, on the
@@ -69,7 +70,7 @@ reset=0
 require_token="${RESET_TOKEN_REQUIRED:-0}"
 games=1
 preload="${LAYA_PRELOAD:-general}"
-hub="${LAYA_HUB:-TDoSiMa/sima-laya}"
+hub="${LAYA_HUB:-dotimothy/sima-laya}"
 llm="${LAYA_LLM:-http://127.0.0.1:9998}"
 
 https_args=()      # how the app serves HTTPS, if not in its own way
@@ -247,7 +248,7 @@ do_update() {
 # Before anything that needs the runtime: an update is also how a broken build gets mended.
 case "${1:-}" in
   update|--update|upgrade) do_update; exit $? ;;
-  -h|--help) sed -n '2,52p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,53p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
 [[ -x "${APP_DIR}/laya" ]] || fail "the runtime is not built yet; run ./setup.sh first"
@@ -290,7 +291,7 @@ while [[ $# -gt 0 ]]; do
       pids="$(pgrep -f 'python3 .*webapp/server[.]py' || true)"
       [[ -n "$pids" ]] && kill -TERM $pids && echo "stopped" || echo "not running"
       exit 0 ;;
-    -h|--help) sed -n '2,52p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,53p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "unknown option: $1 (see --help)" ;;
   esac
 done

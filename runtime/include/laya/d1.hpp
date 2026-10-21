@@ -34,6 +34,12 @@
 // tokens in its row. Its config says `"family": "lm"`; everything else is shared with d1-omni:
 // the chains of graphs, the masks that lay rows end to end (causal ones here), the vision
 // tower.
+//
+// A causal model reads a row's beginning without regard to what follows, so what a request's
+// questions begin with alike, the picture and the state, is read once: those tokens, then each
+// question's own behind a few copies of the shared part's last tokens, which stand in for it
+// where the convolution looks back (`d1_sima.lmio.tree`). A question's tokens stand at the
+// positions they would have straight after the shared part, which the graphs take as an input.
 #ifndef LAYA_D1_HPP_
 #define LAYA_D1_HPP_
 
@@ -78,6 +84,10 @@ struct Config {
   std::map<std::string, std::vector<uint32_t>> letters;
   std::map<uint32_t, std::vector<std::string>> elfs;  // sequence length -> its graphs, in the order they run
   std::vector<std::vector<std::string>> inputs;       // what each graph of a chain takes, in order
+  // lm, where the graphs take RoPE as an input: the width of a head and the base of its angles,
+  // and how many copies of the shared part's last tokens lead a question that follows it.
+  uint32_t rope_dim = 0, ghosts = 0;
+  double rope_theta = 0;
   std::map<std::string, uint32_t> tokens;             // bos and the delimiters
   std::map<std::string, uint32_t> question_types;
   std::map<std::string, double> temperatures;
@@ -103,6 +113,7 @@ struct Row {
 struct Cost {
   double tokenize_ms = 0, pre_ms = 0, mla_ms = 0, vision_ms = 0;
   size_t passes = 0, tokens = 0, dropped = 0, prefix = 0, pictures = 0, pictures_cached = 0;
+  size_t shared = 0;     // lm: tokens the questions begin with alike, read once a pass
   uint32_t seq_len = 0;  // the longest chain a pass ran on
 };
 
@@ -131,9 +142,13 @@ class Runtime {
 
   // One pass: rows laid end to end on one chain (`seq_len`, or 0 for the shortest they fit),
   // and each row's scores, one an option. `prefix`: the pictures' embeddings, which go in
-  // front of every row (omni) or in the places of its `<image>` tokens (lm).
+  // front of every row (omni) or in the places of its `<image>` tokens (lm). `shared` (lm):
+  // the rows' first `shared` tokens are the same and are read once.
   std::vector<std::vector<float>> pass(const std::vector<const Row*>& rows, const std::vector<uint16_t>& prefix, Cost& cost,
-                                       uint32_t seq_len = 0);
+                                       uint32_t seq_len = 0, size_t shared = 0);
+
+  // lm: whether the loaded graphs can read a shared beginning once.
+  bool shares() const { return _cfg.rope_dim != 0; }
 
   // Runs every loaded graph once, so the first request does not pay for cold caches, and notes
   // what a pass on each chain costs: that is what the packing is planned by.
@@ -147,6 +162,8 @@ class Runtime {
   struct Chain;
   struct Graph;
   Row encode_lm(const json& state, const json& question, size_t max_len, const std::vector<size_t>& picture_tokens) const;
+  std::vector<std::vector<float>> pass_lm(const std::vector<const Row*>& rows, const std::vector<uint16_t>& pictures, Cost& cost,
+                                          uint32_t seq_len, size_t shared);
 
   Config _cfg;
   std::unique_ptr<simaai::llima::Tokenizer> _tokenizer;

@@ -18,6 +18,8 @@ decision head and its scorer.
              conv_right   (1, hidden, 1, S)   1 where a position may be read by the one before it
                                               (the same in every channel: the MLA compiler takes
                                               no input of one channel)
+             rope_cos     (1, head_dim, 1, S) d1-3B: the rotation of the position each slot stands
+             rope_sin     (1, head_dim, 1, S) at (`d1_sima.lmio.rope`); d1-omni's are constants
              type_add     (1, hidden, 1, S)   last graph: the question-type embedding of each row
              head_mask    (1, S, 1, S)        last graph: the decision head's attention mask
     output   hidden_out   (1, hidden, 1, S)   after this graph's layers, or from the last graph
@@ -30,6 +32,12 @@ end to end, each attending only to itself and with the convolution's taps cut at
 come out exactly as they would alone: `d1_sima.hostio.layout` builds those masks. A picture is
 a prefix of embeddings in front of its row; prefix positions attend only to the prefix and the
 last of them does not read the text on its right, as in the checkpoint's own code.
+
+d1-3B is a causal language model, so its taps look back (`conv_back1`, `conv_back2` in place of
+`conv_left`, `conv_right`) and what several of its rows begin with can be read once: the
+picture and the state, with each question after them as a branch (`d1_sima.lmio.tree`). A
+branch stands at the positions it would have straight after the shared part, not at its slots'
+own, which is why this model's graphs take RoPE as an input.
 
 `D1VisionModel`: the SigLIP2 tower, for up to N patches of one picture.
 
@@ -155,6 +163,8 @@ class D1TrunkModel(_D1Model):
         names = ["hidden_in"]
         if "full_attention" in self.kinds:
             names.append("mask")
+            if self.cfg.causal:
+                names += ["rope_cos", "rope_sin"]
         if "conv" in self.kinds:
             names += ["conv_back1", "conv_back2"] if self.cfg.causal else ["conv_left", "conv_right"]
         if self.is_last and self.cfg.head_layers:
@@ -165,14 +175,18 @@ class D1TrunkModel(_D1Model):
         cfg, s = self.cfg, self.seq_len
         wide = (1, cfg.hidden_size, 1, s)
         shapes = {"hidden_in": wide, "mask": (1, s, 1, s), "conv_left": wide, "conv_right": wide, "conv_back1": wide,
-                  "conv_back2": wide, "type_add": wide, "head_mask": (1, s, 1, s)}
+                  "conv_back2": wide, "type_add": wide, "head_mask": (1, s, 1, s),
+                  "rope_cos": (1, cfg.head_dim, 1, s), "rope_sin": (1, cfg.head_dim, 1, s)}
         self.create_onnx_builder()
         for name in self.input_names:
             self._b.create_input_node(name, shapes[name])
         nodes = dict(zip(self.input_names, self._b.input_nodes))
         hidden = nodes["hidden_in"]
         rope_q = rope_k = None
-        if "mask" in nodes:
+        if "rope_cos" in nodes:
+            rope_q = self._rope_inputs("rope.q", nodes["rope_cos"], nodes["rope_sin"], cfg.num_attention_heads)
+            rope_k = self._rope_inputs("rope.k", nodes["rope_cos"], nodes["rope_sin"], cfg.num_key_value_heads)
+        elif "mask" in nodes:
             rope_q = self._rope_tables("rope.q", cfg.num_attention_heads)
             rope_k = self._rope_tables("rope.k", cfg.num_key_value_heads)
 
@@ -279,6 +293,13 @@ class D1TrunkModel(_D1Model):
             return self._b.create_initializer(name, np.ascontiguousarray(a, dtype=np.float32))
 
         return table(f"{base_name}.cos", cos), table(f"{base_name}.sin", sin)
+
+    def _rope_inputs(self, base_name: str, cos: OnnxNode, sin: OnnxNode, heads: int) -> tuple[OnnxNode, OnnxNode]:
+        """The same two tables where they are inputs of the graph, (1, head_dim, 1, S): repeated
+        here over the heads, once for the graph's layers."""
+        shape = (1, self.cfg.head_dim, heads, self.seq_len)
+        return (self._b.build_split_expand_concat(f"{base_name}.cos", cos, 1, heads, 2, 2, shape),
+                self._b.build_split_expand_concat(f"{base_name}.sin", sin, 1, heads, 2, 2, shape))
 
     def _build_rope(self, base_name: str, input_node: OnnxNode, rope: tuple[OnnxNode, OnnxNode]) -> OnnxNode:
         cos, sin = rope

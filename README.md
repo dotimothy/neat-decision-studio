@@ -25,8 +25,10 @@ This repository compiles those models for the SiMa.ai Modalix MLA and runs them 
   or against a language model), and a model manager.
 
 Checkpoints and compiled artifacts are not in the repository. The compiled models are on
-Hugging Face at [TDoSiMa/sima-laya](https://huggingface.co/TDoSiMa/sima-laya), where the app
-downloads them from, and the Build section regenerates them.
+Hugging Face at [dotimothy/sima-laya](https://huggingface.co/dotimothy/sima-laya) (CLM at
+[dotimothy/sima-clm](https://huggingface.co/dotimothy/sima-clm), and LiquidAI's d1 models, under
+their own licence, at [dotimothy/sima-d1](https://huggingface.co/dotimothy/sima-d1)), where the
+app downloads them from, and the Build section regenerates them.
 
 ## The demo
 
@@ -452,11 +454,13 @@ embedding table as bfloat16, the act-head tail and `laya_config.json`.
 
 ## Compiled models on Hugging Face
 
-The models compiled here are published at https://huggingface.co/TDoSiMa/sima-laya, so a
+The models compiled here are published at https://huggingface.co/dotimothy/sima-laya, so a
 board does not need a host with the compiler to run them: `general`, `general-int8` (the
 int8-weights build at 128 tokens), `typed-decisions`, `multilingual` and `dino`, 11.9 GB in
-all, and `clm`, CLM with its 128-token chain, another 8.5 GB. The app's Settings lists them next to the models already on the board, downloads one
-onto the board and offers it for loading, and can delete it again; nothing but the runtime
+all; `clm`, CLM with its 128-token chain, another 9.1 GB, is at
+https://huggingface.co/dotimothy/sima-clm, and the d1 models at
+https://huggingface.co/dotimothy/sima-d1 (below). The app's Settings lists them next to the
+models already on the board, downloads one onto the board and offers it for loading, and can delete it again; nothing but the runtime
 has to be on the board first (see [Install](#install)).
 
 The repository's `models.json` lists each model's files with sizes and SHA-256 sums, and what
@@ -471,9 +475,16 @@ another repository, `--hub none` turns the feature off.
 
 `tools/publish_hub.py --repo NAME` uploads the builds under `build/` and writes `models.json`
 and the model card; it needs `huggingface_hub` and a login with write access. A model that
-is not uploaded in a run keeps the entry it has. CLM is listed apart, under `models_v2`: a
-copy of the app from before CLM reads `models` alone and is not troubled by an entry it
-would not understand.
+is not uploaded in a run keeps the entry it has.
+
+CLM and the d1 models each have a repository of their own (`--clm-repo`, `--d1-repo`), with
+its own card, and are listed in the same `models.json` under `models_v3`, each with the
+`repo` its files are fetched from. A copy of the app from before that reads `models` and
+`models_v2` alone, so it neither refuses the list for a kind it does not know nor looks for
+a model in the wrong repository; it simply does not offer these. The two d1 models, `d1`
+(1.6 GB) and `d1-3b` (12.8 GB, with chains for 128, 384 and 512 tokens), are apart also
+because their licence is not Apache-2.0: their repository is labelled with the LFM Open
+License v1.0 and carries it, and its card says what was changed.
 
 ## Run on the board
 
@@ -555,11 +566,11 @@ Behind it are five areas:
   read at and as how many positions, and what each model answered. **Live** decides a camera
   or a video file frame after frame, as fast as the board answers, with the answer over the
   video and a line of the last frames' answers under it (about four frames a second with d1
-  Omni and three questions; under one with d1 3B beside it); **Keep Frame** puts what is on
+  Omni and three questions, two with d1 3B); **Keep Frame** puts what is on
   screen into the test set. (A browser gives a page its camera only over HTTPS or on the machine
   itself, which is why the app serves HTTPS: see [Run on the board](#run-on-the-board).) On the
   example sets, 48 labelled answers, d1 3B agrees with the person on 45 and d1 Omni on 37, at
-  about 1 s and 0.2 s a picture for three questions.
+  about 0.5 s and 0.2 s a picture for three questions.
 - **Games** (`/games`): Snake, which the tab opens on, Chess, Tic-Tac-Toe, Rock Paper Scissors,
   Dino Arena, Blackjack and Sudoku, below. A person can join every one of them, any two
   loaded models can play each other in every one of them, and three can be played against a
@@ -617,7 +628,8 @@ below that cuts what the model is shown and the play shows it: blackjack at a bu
 took the intended action in 307 of 432 decisions, against 390 of 390 uncut.
 
 `./run.sh` loads the general model at startup (`--preload NAME|none` changes that, and takes
-several names separated by commas) and logs
+several names separated by commas; `NAME:128+384` loads those of a model's sequence lengths
+and not its usual ones) and logs
 every load and unload with the address it came from. `./run.sh --help` lists the remaining
 options. In the API, `POST /api/predict` takes `{"state", "questions"}` plus an optional
 `"model"`, `"seq_len"` (pin a graph), `"max_len"` (the token budget) and `"head_max_len"`
@@ -903,8 +915,9 @@ pictures.
 > for research and for organisations under 10 million dollars of annual revenue, and
 > commercial use above that needs a licence from Liquid AI. The licence is copied into a
 > compiled model's directory. Nothing of LiquidAI's code is in this repository; the
-> reference tools load it from the checkpoint. The compiled d1 models are not published on
-> this repository's Hugging Face page.
+> reference tools load it from the checkpoint. The compiled d1 models are published apart
+> from the others, at [dotimothy/sima-d1](https://huggingface.co/dotimothy/sima-d1), under that
+> licence.
 
 **d1-omni-600M** is an LFM2 trunk of 16 layers (ten short convolutions, six of grouped-query
 attention) read in both directions, a decision head of two transformer layers, and a SigLIP2
@@ -941,13 +954,27 @@ the final hidden state against rows of the embedding table, so the runtime compu
 options' rows, on the CPU. The 30 layers are a chain of eight graphs a sequence length; the
 masks are the causal ones, with the two taps that look back cut at a row's start.
 
+A causal model reads the beginning of a row the same whatever follows it, so what a request's
+questions begin with alike, the picture and the state, is read once: those tokens, and after
+them each question's own as a branch. For attention that is a matter of masks and of positions:
+a branch's tokens stand where they would straight after the shared part, not at their slots,
+which is why this model's graphs take RoPE's rotation as an input where d1-omni's hold it as a
+constant. The convolution is the difficulty, since it reads the two slots before a token
+whatever is in them, so each branch is led by copies of the shared part's last eight tokens.
+With 44 copies, two for each convolution layer, a question comes out exactly as in a row of
+its own; with eight its logits differ by 0.0001 (`tools/d1_lm_tree_check.py`), a thousandth of
+what quantizing the weights changes. The runtime prices each way of laying a request out (a
+pass a question, rows end to end, rows behind what they share, on each loaded chain) by the
+time a pass was measured to take, and uses the cheapest.
+
 ```bash
 # on the host, in the SDK container
 .venv-ref/bin/python tools/d1_reference.py                      # PyTorch answers to check against
 bin/d1-compile models/d1-omni-600m -o build/d1-omni             # about 35 minutes
-bin/d1-compile models/d1-3b -o build/d1-3b --layers_per_graph 4    # hours in one run: --graphs
-                                                                   # builds part of the chain, so
-                                                                   # several runs can share it
+bin/d1-compile models/d1-3b -o build/d1-3b --layers_per_graph 4 --seq_lens 128,384,512
+                                                                # hours in one run: --graphs builds
+                                                                # part of a chain, so several runs
+                                                                # can share the work
 bin/laya-deploy --extra d1=build/d1-omni --extra d1-3b=build/d1-3b --board sima@<board-ip>
 python3 tools/d1_check.py                                       # the board against PyTorch
 ```
@@ -989,13 +1016,21 @@ build/d1_3b_reference --model-dir model-d1-3b`):
 
 | | |
 |---|---|
-| a pass, 128-token chain (8 graphs) | 91 ms |
-| a pass, 512-token chain | 310 ms; three questions about one text go in one pass |
+| a pass, 128-token chain (8 graphs) | 92 ms |
+| a pass, 384-token chain | 228 ms |
+| a pass, 512-token chain | 310 ms |
 | a picture: tower and projector | 189 ms |
-| a question about a picture | 310 ms; about 500 ms in all with a new picture |
+| three questions about a text | 183 ms: two passes of the short chain, the state read once in each; a pass a question took 274 ms |
+| three questions about a picture | 228 ms: one pass of the 384-token chain, the picture read once; a pass a question took 930 ms. About 470 ms in all with a new picture |
+| four questions about a picture | 310 ms: one pass of the 512-token chain; a pass a question took 1240 ms |
 | decisions the same as PyTorch's | 27 of 27 (13 on text, 14 on pictures) |
-| largest difference in a probability | 0.046 |
-| on the MLA | 5.3 GB as the app loads it: the 512-token chain (3.6 GB) and the tower (1.7 GB); the 128-token chain is another 2.9 GB |
+| largest difference in a probability | 0.068 |
+| graph files | 2.9, 3.3 and 3.6 GB for the 128-, 384- and 512-token chains, and 1.7 GB for the tower |
+
+The app loads the longest chain of a model this size unless told which
+(`--preload d1-3b:128+384`, or the Models page): the short chain for text and the 384-token
+one for a picture and up to three questions are what the figures above were mostly measured
+on, and the 512-token one adds room for more questions or a long state.
 
 d1-3B is the more careful reader: it says the drawn red circle is there with 99%, counts two
 shapes and two cats, and knows which lamp of a traffic light is lit, where d1-omni does not.
@@ -1268,9 +1303,9 @@ trained on. The code is in place but has never been run to completion.
 - d1 reads a picture as one crop of at most 512 x 512 pixels (256 positions). LiquidAI's code
   cuts a larger picture into up to ten tiles and a thumbnail; that is not ported, so fine
   detail in a large picture is lost here. d1-omni's audio encoder is not compiled. Both d1
-  models are compiled for 128 and 512 tokens, and a state that does not fit is cut at its
-  end. On d1-3B a choice has at most 26 options. The compiled d1 models are not on this
-  repository's Hugging Face page (see their licence in the d1 section).
+  models are compiled for 128 and 512 tokens (d1-3B for 384 as well), and a state that does
+  not fit is cut at its end. On d1-3B a choice has at most 26 options. The compiled d1 models
+  are on Hugging Face under their own licence, not Apache-2.0 (see the d1 section).
 - Not ported from upstream: `option_order`, long-document windowing (`predict_long`), hooks,
   `min_confidence` abstention and per-language temperatures.
 - The shipped checkpoints' act heads saturate (act probability is 1.0 on everything tried, in
