@@ -368,18 +368,19 @@ cd neat-decision-studio
 </main>
 
 <footer class="app-footer">
-  <span>Powered by <strong class="neat-name"><img src="assets/brand/neat-mark.png" alt="">SiMa.ai Palette Neat</strong> on the Modalix MLSoC</span>
-  <img class="on-light" src="assets/brand/sima-on-light.png" alt="SiMa.ai">
-  <img class="on-dark" src="assets/brand/sima-on-dark.png" alt="SiMa.ai">
-  <span id="copyright">&copy; SiMa.ai, Inc.</span>
-  <span>Laya models by Convai Innovations, Apache-2.0</span>
+  <div class="names">
+    <span><b><a href="https://sima.ai" target="_blank" rel="noopener">SiMa.ai</a></b></span><span><b>MLSoC Modalix</b></span><span><b>LLiMa</b></span>
+    <span><b><span class="neat-name"><img src="assets/brand/neat-mark.png" alt="">Palette Neat</span></b></span><span>Scaling Physical AI</span>
+  </div>
+  <div class="copyright">&copy; <span id="copyYear">2026</span> SiMa.ai, Inc. All rights reserved. &middot; Modalix&trade;, LLiMa&trade; and Neat&trade; are trademarks of SiMa.ai.
+    <span class="credit">Laya models by Convai Innovations, Apache-2.0.</span></div>
 </footer>
 
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 const make = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
-$("copyright").textContent = `© ${new Date().getFullYear()} SiMa.ai, Inc.`;
+$("copyYear").textContent = new Date().getFullYear();
 
 // ---- Dark mode, on or off (theme.js): a moon while it is off, a sun while it is on.
 function showTheme() {

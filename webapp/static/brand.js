@@ -156,11 +156,13 @@
       for (const node of [...bar.childNodes]) if (node.id !== "picker") node.remove();
       bar.prepend("Games ", ...GAMES.map(([name, href]) => make("a", { href, textContent: name, className: href === here ? "here" : "" })));
     }
+    // NEAT GenAI Studio's footer: the platform's names, then the copyright and trademarks.
+    const name = (text) => make("span", {}, make("b", { textContent: text }));
     document.body.append(make("footer", { className: "app-footer" },
-      make("span", {}, "Powered by ", neatName("SiMa.ai Palette Neat"), " on the Modalix MLSoC"),
-      make("img", { className: "on-light", src: "/static/brand/sima-on-light.png", alt: "SiMa.ai" }),
-      make("img", { className: "on-dark", src: "/static/brand/sima-on-dark.png", alt: "SiMa.ai" }),
-      make("span", { textContent: `\u00a9 ${new Date().getFullYear()} SiMa.ai, Inc.` }),
-      make("span", { textContent: "Laya models by Convai Innovations, Apache-2.0" })));
+      make("div", { className: "names" },
+        make("span", {}, make("b", {}, make("a", { href: "https://sima.ai", target: "_blank", rel: "noopener", textContent: "SiMa.ai" }))),
+        name("MLSoC Modalix"), name("LLiMa"), make("span", {}, make("b", {}, neatName("Palette Neat"))), make("span", { textContent: "Scaling Physical AI" })),
+      make("div", { className: "copyright" }, `\u00a9 ${new Date().getFullYear()} SiMa.ai, Inc. All rights reserved. \u00b7 Modalix\u2122, `
+        + "LLiMa\u2122 and Neat\u2122 are trademarks of SiMa.ai.", make("span", { className: "credit", textContent: "Laya models by Convai Innovations, Apache-2.0." }))));
   });
 })();
