@@ -5,7 +5,7 @@ decision models: a ModernBERT-style encoder with a small decision head. A model 
 (text or JSON) and a typed question (`choice`, `score` or `noul`) and returns a probability
 for each option in one forward pass, with no text generation.
 
-**Project page: [dotimothy.github.io/neat-decision-studio](https://dotimothy.github.io/neat-decision-studio/)**
+**Project page: [timothydo.me/neat-decision-studio](https://timothydo.me/neat-decision-studio/)**
 
 ![Debate: a yes-or-no question answered as it is typed, in about 19 ms per decision](docs/debate.gif)
 
