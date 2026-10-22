@@ -124,7 +124,7 @@
   if (document.body.dataset.home === undefined) header.after(make("div", { className: "pagehead" }, title, tagline));
 
   // The games, in the order the switcher lists them; the first is the one the Games tab opens.
-  const GAMES = [["Snake", "/games/snake"], ["Chess", "/games/chess"], ["Tic-Tac-Toe", "/games/tictactoe"],
+  const GAMES = [["Snake", "/games/snake"], ["Pac-Man", "/games/pacman"], ["Chess", "/games/chess"], ["Tic-Tac-Toe", "/games/tictactoe"],
                  ["Rock Paper Scissors", "/games/rps"], ["Dino Arena", "/games/dino"], ["Blackjack", "/games/blackjack"],
                  ["Sudoku", "/games/sudoku"]];
 

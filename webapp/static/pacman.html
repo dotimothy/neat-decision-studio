@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/static/brand/neat-decision.svg">
+<title>Neat Decision Studio</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1f6feb; --accent-ink: #ffffff; --good: #1a7f4b; --warn: #b45309; --bad: #c0362c;
+    --track: #e8ebf1; --chip: #eef2f8; --field: #ffffff; --sky: #f9fafc; --you: #b45309;
+    --pac: #e0a800;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebf0; --muted: #98a2b3; --line: #2a303a;
+      --accent: #5b9dff; --accent-ink: #0b1220; --good: #4cc38a; --warn: #f0a84b; --bad: #f47067;
+      --track: #232934; --chip: #1f252e; --field: #11151a; --sky: #0b0e12; --you: #f0a84b;
+      --pac: #f5c518;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 18px 24px 12px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  nav { display: flex; gap: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid transparent; font-size: 14px; }
+  nav a:hover { border-color: var(--line); }
+  nav a.here { color: var(--ink); background: var(--chip); border-color: var(--line); }
+  main { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 16px;
+         padding: 0 24px 32px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 0 16px 24px; }
+                              header { padding: 16px 16px 10px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .controls { margin-top: 12px; justify-content: space-between; }
+  .hint { color: var(--muted); font-size: 13.5px; }
+  kbd { font: 12px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+        padding: 1px 6px; background: var(--chip); color: var(--ink); }
+  button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+  button.small { padding: 3px 10px; font-size: 13.5px; }
+  select { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line);
+           border-radius: 8px; padding: 6px 8px; }
+  .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--chip); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-variant-numeric: tabular-nums; font-size: 16px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hero .value { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .hero .unit { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+        font: 12.5px/1.4 var(--mono); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .block { margin-top: 16px; }
+  .note { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .error { color: var(--bad); margin-top: 10px; overflow-wrap: anywhere; }
+  .gamebar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0 24px 12px; color: var(--muted); font-size: 14px; }
+  .gamebar a { color: var(--muted); text-decoration: none; padding: 3px 12px; border-radius: 8px; border: 1px solid var(--line); }
+  .gamebar a.here { color: var(--ink); background: var(--chip); border-color: var(--accent); }
+  @media (max-width: 900px) { .gamebar { padding: 0 16px 10px; } }
+  canvas { display: block; margin: 0 auto; border-radius: 8px; background: var(--sky); border: 1px solid var(--line); }
+  #boardwrap { display: flex; gap: 12px; align-items: flex-start; }
+  .lane { flex: 1 1 0; min-width: 0; }
+  .lanehead { font-size: 12.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; text-align: center; }
+  #laneYou { color: var(--you); }
+  .boardhead { justify-content: space-between; margin-bottom: 10px; }
+  .boardhead h2 { margin: 0; }
+  .option { display: grid; grid-template-columns: 70px minmax(0, 1fr) 52px; gap: 8px; align-items: center; margin-top: 7px; font-size: 13.5px; }
+  .option .what { color: var(--muted); }
+  .option.top .move { font-weight: 650; }
+  .option .track { grid-column: 2; height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .option .track i { display: block; height: 100%; width: 0; background: var(--accent); opacity: .4; border-radius: 999px; }
+  .option.top .track i { opacity: 1; }
+  .option .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .option.fatal .what { color: var(--bad); }
+  .option.gone { opacity: .35; }
+</style>
+<link rel="stylesheet" href="/static/neat.css">
+<script src="/static/theme.js"></script>
+</head>
+<body>
+<header>
+  <h1>Pac-Man</h1>
+  <p id="tagline">Laya picks every move on the Modalix MLA from a description of where each way leads</p>
+  <nav><a href="/debate">Debate</a><a href="/questions">Questions</a><a href="/compare">Compare</a><a class="here" href="/games">Games</a></nav>
+</header>
+<script src="/static/brand.js"></script>
+<div class="gamebar">Games <div id="picker"></div></div>
+<main>
+  <section>
+    <div class="row boardhead">
+      <h2>Maze</h2>
+      <span class="hint" id="level">Level 1</span>
+    </div>
+    <div id="boardwrap">
+      <div class="lane"><div class="lanehead" id="laneLaya" hidden>Laya &middot; MLA</div><canvas id="board" width="570" height="630" aria-label="Laya's Pac-Man"></canvas></div>
+      <div class="lane" id="yourLane" hidden><div class="lanehead" id="laneYou">You</div><canvas id="boardYou" width="570" height="630" aria-label="Your Pac-Man"></canvas></div>
+    </div>
+    <div class="row controls">
+      <span class="hint" id="hint">One decision per step</span>
+      <span class="row">
+        <select id="speed" aria-label="Speed">
+          <option value="watch">Watch Speed</option>
+          <option value="fast">As Fast As It Decides</option>
+        </select>
+        <button id="restart">New Game</button>
+        <button id="auto">Pause</button>
+        <select id="rival" aria-label="Who races" data-seat="Against {}"><option value="you">Against You</option><option value="laya">Against Laya</option></select>
+        <button class="primary" id="race">Start Race</button>
+      </span>
+    </div>
+    <div class="scores">
+      <div class="stat"><b id="score">0</b><span>points this game</span></div>
+      <div class="stat"><b id="lives">3</b><span>lives left</span></div>
+      <div class="stat"><b id="cleared">0</b><span>levels cleared this game</span></div>
+      <div class="stat"><b id="best">0</b><span>best game</span></div>
+      <div class="stat"><b id="games">0</b><span>games finished</span></div>
+      <div class="stat"><b id="average">&ndash;</b><span>average points per game</span></div>
+      <div class="stat"><b id="yourScore">&ndash;</b><span id="yourScoreLabel">you: points this race</span></div>
+      <div class="stat"><b id="yourBest">&ndash;</b><span id="yourBestLabel">you: best race</span></div>
+    </div>
+    <p class="note"><kbd>Space</kbd> or <b>Start Race</b> starts two games in the same maze, with the same ghosts. Against you, steer yours with the
+      arrow keys or <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>; it moves eight squares a second, as Laya's does at watch speed, and turns
+      at the next opening the way you last pressed. Against another loaded model, that model is asked what Laya is asked, and they race again when both are done.</p>
+    <div class="row controls"><span class="hint">Scores are kept until reset.</span><button class="small" id="resetScores">Reset Scores</button></div>
+    <div class="error" id="error" hidden></div>
+  </section>
+
+  <section>
+    <h2>Laya's Decisions</h2>
+    <div class="hero"><span class="value" id="mlaMs">&ndash;</span><span class="unit">ms on the MLA per decision</span></div>
+    <div class="stats">
+      <div class="stat"><b id="rate">&ndash;</b><span>moves per second</span></div>
+      <div class="stat"><b id="count">0</b><span>decisions made</span></div>
+      <div class="stat"><b id="matched">&ndash;</b><span>picked a best-described way</span></div>
+      <div class="stat"><b id="trip">&ndash;</b><span>browser round trip</span></div>
+    </div>
+    <div class="block">
+      <h2>What It Is Told</h2>
+      <pre id="sees">&ndash;</pre>
+      <p class="note">The model is not shown the maze. The harness works out where each open way leads and says it in a few words;
+        those descriptions are the options of the question. It tries each step to see whether a ghost would catch Pac-Man, calls a way
+        dangerous when it closes in on a ghost four squares away or nearer, and otherwise says whether it brings Pac-Man closer to the food:
+        a blue ghost it can still catch, or else the nearest dot.</p>
+    </div>
+    <div class="block">
+      <h2>Which Way It Picks</h2>
+      <div id="options"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/pacman-core.js"></script>
+<script src="/static/model-picker.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const canvas = $("board");
+
+let seed = Date.now() & 0xfffff;
+const world = new PacmanWorld(seed);
+let auto = true, looping = false, game = 0;
+// The other player in a race, the way a person last steered, and its best race. It is a
+// person's, steered with the keys, or another loaded model's, which is asked what Laya is asked.
+let you = null, want = null, yourBest = null, racing = 0;
+const rivalIsModel = () => $("rival").value === "laya";
+const rivalModel = () => picker.seatModel($("rival"));
+const rivalName = () => !rivalIsModel() ? "You" : rivalModel() === picker.name ? "Another " + picker.short(rivalModel()) : picker.short(rivalModel());
+const fresh = () => ({ best: 0, games: 0, points: 0, decisions: 0, matched: 0 });
+let stats = fresh();
+const recent = [];
+// A word over a board for a moment: a life lost, a level cleared.
+const banners = new WeakMap();
+const banner = (world, text) => banners.set(world, { text, until: performance.now() + 1000 });
+
+class NotLoaded extends Error {}
+
+async function ask(model, budget, w) {
+  const { outcomes, question } = w.question();
+  const sent = performance.now();
+  let body;
+  try {
+    body = await (await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, max_len: budget, state: PACMAN_STATE, questions: { move: question } }) })).json();
+  } catch (error) { body = { error: "The board did not answer: " + error.message }; }
+  return { outcomes, body, trip: performance.now() - sent };
+}
+
+async function decide() {
+  const { outcomes, body, trip } = await ask(picker.name, picker.budget, world);
+  if (body.not_loaded) throw new NotLoaded(body.error);
+  if (body.error) throw new Error(body.error);
+  picker.report(body.usage);
+  const answer = body.answers.move;
+  recent.push({ at: performance.now(), mla: body.usage.mla_ms, trip });
+  while (recent.length > 60) recent.shift();
+  stats.decisions++;
+  if (outcomes[pacmanMove(answer.choice)] === Math.min(...Object.values(outcomes))) stats.matched++;
+  showDecision(outcomes, answer);
+  return pacmanMove(answer.choice);
+}
+
+function showDecision(outcomes, answer) {
+  $("sees").textContent = PACMAN_STATE;
+  const root = $("options");
+  if (!root.children.length) {
+    for (const move of PACMAN_MOVES) {
+      const row = document.createElement("div"); row.dataset.move = move;
+      row.innerHTML = '<span class="move"></span><span class="what"></span><span class="pct"></span><span class="track"><i></i></span>';
+      row.querySelector(".move").textContent = PACMAN_OPTIONS[move];
+      root.append(row);
+    }
+  }
+  for (const row of root.children) {
+    const move = row.dataset.move, open = move in outcomes, p = open ? answer.probabilities[PACMAN_OPTIONS[move]] : 0;
+    row.className = "option" + (move === pacmanMove(answer.choice) ? " top" : "") + (open && outcomes[move] >= PACMAN_RISKY_FROM ? " fatal" : "") + (open ? "" : " gone");
+    row.querySelector(".what").textContent = open ? PACMAN_OUTCOMES[outcomes[move]] : "a wall, not offered";
+    row.querySelector("i").style.width = (p * 100).toFixed(1) + "%";
+    row.querySelector(".pct").textContent = open ? (p * 100).toFixed(1) + "%" : "";
+  }
+}
+
+function showStats() {
+  $("score").textContent = world.score.toLocaleString();
+  $("lives").textContent = world.lives;
+  $("cleared").textContent = world.cleared;
+  $("level").textContent = `Level ${world.level}`;
+  $("best").textContent = Math.max(stats.best, world.score).toLocaleString();
+  $("games").textContent = stats.games;
+  $("average").textContent = stats.games ? Math.round(stats.points / stats.games).toLocaleString() : "–";
+  $("count").textContent = stats.decisions.toLocaleString();
+  $("matched").textContent = stats.decisions ? `${stats.matched.toLocaleString()} of ${stats.decisions.toLocaleString()}` : "–";
+  if (recent.length) {
+    const mean = (key) => recent.reduce((sum, r) => sum + r[key], 0) / recent.length;
+    $("mlaMs").textContent = mean("mla").toFixed(1);
+    $("trip").textContent = mean("trip").toFixed(0) + " ms";
+    $("rate").textContent = recent.filter((r) => performance.now() - r.at < 1000).length;
+  }
+}
+
+function palette() {
+  const css = getComputedStyle(document.documentElement);
+  const get = (name) => css.getPropertyValue(name).trim();
+  return { line: get("--line"), muted: get("--muted"), bad: get("--bad"), accent: get("--accent"), ink: get("--ink"),
+           panel: get("--panel"), pac: get("--pac") || "#f5c518", you: get("--you") || get("--warn") };
+}
+let color = palette();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { color = palette(); draw(); });
+addEventListener("themechange", () => { color = palette(); draw(); });        // the header's dark mode button
+
+const FACING = { right: 0, down: Math.PI / 2, left: Math.PI, up: -Math.PI / 2 };
+
+function drawGhost(ctx, ghost, w, cell) {
+  const cx = (ghost.x + 0.5) * cell, cy = (ghost.y + 0.5) * cell, r = cell * 0.42;
+  const look = PACMAN_STEP[ghost.dir] || { x: 0, y: 0 };
+  if (ghost.state !== "eyes") {
+    const ending = ghost.scared && w.frightened < 12 && w.frightened % 2;
+    ctx.fillStyle = ghost.scared ? (ending ? "#e8ecff" : "#2f4fd8") : ghost.color;
+    ctx.beginPath();
+    ctx.arc(cx, cy - r * 0.1, r, Math.PI, 0);
+    const bottom = cy + r * 0.9, wave = (2 * r) / 3;
+    ctx.lineTo(cx + r, bottom);
+    for (let i = 0; i < 3; i++) { const x = cx + r - i * wave; ctx.lineTo(x - wave / 2, bottom - r * 0.28); ctx.lineTo(x - wave, bottom); }
+    ctx.closePath(); ctx.fill();
+    if (ghost.scared) {                  // a blue ghost's face: two small eyes and a wavy mouth
+      ctx.fillStyle = ctx.strokeStyle = ending ? "#c0362c" : "#f2d0a4";
+      for (const side of [-1, 1]) ctx.fillRect(cx + side * r * 0.32 - r * 0.1, cy - r * 0.3, r * 0.2, r * 0.2);
+      ctx.lineWidth = Math.max(1, r * 0.1); ctx.beginPath();
+      for (let i = 0; i <= 6; i++) ctx.lineTo(cx - r * 0.55 + i * r * 0.183, cy + r * 0.3 + (i % 2 ? -1 : 1) * r * 0.1);
+      ctx.stroke();
+      return;
+    }
+  }
+  for (const side of [-1, 1]) {
+    const ex = cx + side * r * 0.36, ey = cy - r * 0.2;
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.ellipse(ex, ey, r * 0.26, r * 0.32, 0, 0, 6.3); ctx.fill();
+    ctx.fillStyle = "#1d3b8f"; ctx.beginPath(); ctx.arc(ex + look.x * r * 0.12, ey + look.y * r * 0.14, r * 0.13, 0, 6.3); ctx.fill();
+  }
+}
+
+// One game's maze on its canvas, `room` pixels wide at most.
+function paint(canvas, w, room, { pacColor, message = null }) {
+  const ctx = canvas.getContext("2d"), ratio = window.devicePixelRatio || 1;
+  const cell = Math.min(room / w.cols, Math.max(360, innerHeight * 0.72) / w.rows);
+  const width = Math.floor(cell * w.cols), height = Math.floor(cell * w.rows);
+  if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+    canvas.style.width = width + "px"; canvas.style.height = height + "px";
+    canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio);
+  }
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  // Walls: a light fill, and a line where a wall meets the floor.
+  const wall = (x, y) => y >= 0 && y < w.rows && x >= 0 && x < w.cols && PACMAN_MAZE[y][x] === "#";
+  ctx.fillStyle = color.accent; ctx.globalAlpha = 0.12;
+  for (let y = 0; y < w.rows; y++) for (let x = 0; x < w.cols; x++) if (wall(x, y)) ctx.fillRect(x * cell, y * cell, cell, cell);
+  ctx.globalAlpha = 1; ctx.strokeStyle = color.accent; ctx.lineWidth = Math.max(1.5, cell * 0.08); ctx.lineCap = "round";
+  ctx.beginPath();
+  for (let y = 0; y < w.rows; y++) for (let x = 0; x < w.cols; x++) {
+    if (!wall(x, y)) continue;
+    const floor = (dx, dy) => { const nx = x + dx, ny = y + dy; return nx >= 0 && ny >= 0 && nx < w.cols && ny < w.rows && !wall(nx, ny); };
+    if (floor(0, -1)) { ctx.moveTo(x * cell, y * cell); ctx.lineTo((x + 1) * cell, y * cell); }
+    if (floor(0, 1)) { ctx.moveTo(x * cell, (y + 1) * cell); ctx.lineTo((x + 1) * cell, (y + 1) * cell); }
+    if (floor(-1, 0)) { ctx.moveTo(x * cell, y * cell); ctx.lineTo(x * cell, (y + 1) * cell); }
+    if (floor(1, 0)) { ctx.moveTo((x + 1) * cell, y * cell); ctx.lineTo((x + 1) * cell, (y + 1) * cell); }
+  }
+  ctx.stroke();
+  ctx.strokeStyle = "#f38fbf"; ctx.lineWidth = Math.max(2, cell * 0.12);       // the house's door
+  ctx.beginPath(); ctx.moveTo(w.door.x * cell + 2, (w.door.y + 0.5) * cell); ctx.lineTo((w.door.x + 1) * cell - 2, (w.door.y + 0.5) * cell); ctx.stroke();
+  // Dots, and the power pellets, which blink.
+  ctx.fillStyle = color.ink;
+  for (let i = 0; i < w.dots.length; i++) {
+    if (!w.dots[i] || (w.dots[i] === 2 && Math.floor(w.steps / 3) % 2)) continue;
+    const x = i % w.cols, y = Math.floor(i / w.cols);
+    ctx.globalAlpha = w.dots[i] === 2 ? 0.9 : 0.55;
+    ctx.beginPath(); ctx.arc((x + 0.5) * cell, (y + 0.5) * cell, cell * (w.dots[i] === 2 ? 0.27 : 0.1), 0, 6.3); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  for (const ghost of w.ghosts) drawGhost(ctx, ghost, w, cell);
+  // Pac-Man, its mouth opening and closing as it goes.
+  const open = (w.alive ? (w.steps % 2 ? 0.24 : 0.05) : 0.02) * Math.PI, facing = FACING[w.heading];
+  ctx.fillStyle = w.alive ? pacColor : color.muted;
+  ctx.beginPath(); ctx.moveTo((w.pac.x + 0.5) * cell, (w.pac.y + 0.5) * cell);
+  ctx.arc((w.pac.x + 0.5) * cell, (w.pac.y + 0.5) * cell, cell * 0.45, facing + open, facing + 2 * Math.PI - open);
+  ctx.closePath(); ctx.fill();
+  const shown = banners.get(w);
+  if (!message && shown && performance.now() < shown.until) message = shown.text;
+  if (message) {
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = `600 ${Math.round(Math.max(11, Math.min(22, width / 24)))}px system-ui, sans-serif`;
+    const box = Math.min(width - 8, ctx.measureText(message).width + 28), line = parseInt(ctx.font.slice(4)) * 2;
+    ctx.fillStyle = color.panel; ctx.globalAlpha = 0.9;
+    ctx.beginPath(); ctx.roundRect((width - box) / 2, (height - line) / 2, box, line, 8); ctx.fill();
+    ctx.globalAlpha = 1; ctx.fillStyle = color.ink;
+    ctx.fillText(message, width / 2, height / 2, width - 20);
+  }
+}
+
+// Laya's maze, and beside it the other player's while they race.
+function draw() {
+  $("yourLane").hidden = $("laneLaya").hidden = !you;
+  $("laneLaya").textContent = `${picker.short(picker.name)} · MLA`;
+  $("laneYou").textContent = rivalIsModel() ? `${rivalName()} · MLA` : "You";
+  const who = rivalName().toLowerCase() === "you" ? "you" : rivalName();
+  $("yourScoreLabel").textContent = `${who}: points this race`;
+  $("yourBestLabel").textContent = `${who}: best race`;
+  const room = you ? ($("boardwrap").clientWidth - 12) / 2 : $("boardwrap").clientWidth;
+  paint(canvas, world, room, { pacColor: color.pac,
+    message: !picker.ready ? "No model is on the MLA. Load one in Settings." : !world.alive ? `Pac-Man ${world.cause} with ${world.score.toLocaleString()} points` : null });
+  if (you) paint($("boardYou"), you, room, { pacColor: color.you,
+    message: you.alive ? null : `${rivalName()} ${you.cause.replace("was caught", "were caught")} with ${you.score.toLocaleString()} points` });
+  $("yourScore").textContent = you ? you.score.toLocaleString() : "–";
+  $("yourBest").textContent = yourBest === null ? "–" : yourBest.toLocaleString();
+}
+
+// What a step did, said over the maze for a moment.
+function announce(w) {
+  if (w.event === "died" && w.alive) banner(w, `Caught by ${w.caughtBy}: ${w.lives} ${w.lives === 1 ? "life" : "lives"} left`);
+  if (w.event === "level") banner(w, `Level ${w.level}`);
+  return w.event === "died" || w.event === "level";
+}
+
+function newGame() {
+  seed = (seed * 31 + 7) & 0xfffff;
+  world.reset(seed);
+  game++;
+  $("hint").textContent = "One decision per step";
+  draw(); showStats();
+}
+
+// Watch speed is 8 steps a second; otherwise the model sets the pace.
+const pause = (started) => sleep($("speed").value === "watch" ? Math.max(0, 125 - (performance.now() - started)) : 0);
+
+async function loop() {
+  if (looping) return;
+  looping = true;
+  while (auto && picker.ready) {
+    if (!world.alive) {
+      // Two models racing wait for each other, then race again in a new game.
+      const race = racing, duel = you && rivalIsModel();
+      while (duel && race === racing && you && you.alive) await sleep(100);
+      await sleep(1600);
+      if (!auto || !picker.ready) break;
+      if (duel && race === racing && you) { startRace(); continue; }
+      newGame();
+    }
+    const started = performance.now(), asked = game;
+    let move;
+    try { move = await decide(); } catch (error) {
+      if (error instanceof NotLoaded) { picker.lost(); break; }
+      $("error").hidden = false; $("error").textContent = error.message;
+      setAuto(false);
+      break;
+    }
+    $("error").hidden = true;
+    if (asked !== game) continue;        // a new game began while the model was deciding
+    world.step(move);
+    const told = announce(world);
+    if (!world.alive) {
+      stats.games++; stats.points += world.score; stats.best = Math.max(stats.best, world.score);
+      $("hint").textContent = `Pac-Man ${world.cause}. A new game starts in a moment.`;
+    }
+    draw(); showStats();
+    await pause(started);
+    if (told) { await sleep(900); draw(); }
+  }
+  looping = false;
+}
+
+// A race: both start a new game with the same seed, so the ghosts start alike. Yours moves
+// eight squares a second and turns at the next opening the way last pressed.
+const TURNS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", w: "up", s: "down", a: "left", d: "right" };
+async function startRace() {
+  if (!picker.ready) return;
+  const mine = ++racing;
+  newGame();
+  you = new PacmanWorld(seed);
+  want = null;
+  $("hint").textContent = rivalIsModel() ? `${picker.short(picker.name)} against ${rivalName()}, in the same maze` : "Racing: steer with the arrow keys";
+  if (!auto) setAuto(true); else loop();
+  draw();
+  const name = rivalName();
+  while (mine === racing && you && you.alive) {
+    const started = performance.now();
+    let move;
+    if (rivalIsModel()) {
+      const { body } = await ask(rivalModel(), picker.budgetFor(rivalModel()), you);
+      if (mine !== racing || !you) return;
+      if (body.error) { $("error").hidden = false; $("error").textContent = `${name}: ${body.error}`; you = null; draw(); return; }
+      move = pacmanMove(body.answers.move.choice);
+    } else {
+      await sleep(125);
+      if (mine !== racing || !you) return;
+      move = want && you.canGo(want) ? want : you.canGo(you.heading) ? you.heading : null;
+    }
+    you.step(move);
+    const told = announce(you);
+    draw();
+    if (rivalIsModel()) await pause(started);
+    if (told) { await sleep(900); draw(); }
+  }
+  if (mine === racing && you) {
+    yourBest = Math.max(yourBest ?? 0, you.score);
+    $("hint").textContent = rivalIsModel() ? `${name} ${you.cause} with ${you.score.toLocaleString()} points`
+                                           : `You ${you.cause.replace("was caught", "were caught")} with ${you.score.toLocaleString()} points. Space to race again`;
+    draw();
+  }
+}
+addEventListener("keydown", (event) => {
+  if (/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(document.activeElement.tagName) && event.code !== "Space") return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.code === "Space") { if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return; event.preventDefault(); if (!event.repeat && (!you || !you.alive)) startRace(); return; }
+  const turn = TURNS[event.key] || TURNS[event.key.toLowerCase()];
+  if (turn && you && you.alive && !rivalIsModel()) { event.preventDefault(); want = turn; }
+});
+
+function setAuto(value) {
+  auto = value;
+  $("auto").textContent = auto ? "Pause" : "Resume";
+  $("auto").classList.toggle("primary", !auto);
+  if (auto) loop();
+}
+
+function setReady(ready) {
+  $("restart").disabled = $("auto").disabled = $("race").disabled = !ready;
+  draw();
+  if (ready && auto) loop();
+}
+
+$("auto").onclick = () => setAuto(!auto);
+$("restart").onclick = () => { racing++; you = null; newGame(); if (auto) loop(); };
+$("race").onclick = () => { $("race").blur(); startRace(); };
+$("rival").onchange = () => { racing++; you = null; yourBest = null; draw(); };
+$("resetScores").onclick = () => { stats = fresh(); recent.length = 0; showStats(); };
+addEventListener("resize", draw);
+
+const picker = createModelPicker({ mount: $("picker"), onReady: setReady });
+picker.seats($("rival"));
+draw(); showStats();
+</script>
+</body>
+</html>

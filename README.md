@@ -21,7 +21,7 @@ This repository compiles those models for the SiMa.ai Modalix MLA and runs them 
 - **`runtime/`** is a standalone C++ runtime for the board. It uses only the LLiMa runtime
   library (`sima-lmm-dev`: MLA buffers, ELF loading, tokenizer).
 - **`webapp/`** is **Neat Decision Studio**, an example web application on top of the runtime: live yes-or-no answers, a
-  page for your own questions, seven games the models play in real time (with you in them,
+  page for your own questions, eight games the models play in real time (with you in them,
   or against a language model), and a model manager.
 
 Checkpoints and compiled artifacts are not in the repository. The compiled models are on
@@ -571,8 +571,8 @@ Behind it are five areas:
   itself, which is why the app serves HTTPS: see [Run on the board](#run-on-the-board).) On the
   example sets, 48 labelled answers, d1 3B agrees with the person on 45 and d1 Omni on 37, at
   about 0.5 s and 0.2 s a picture for three questions.
-- **Games** (`/games`): Snake, which the tab opens on, Chess, Tic-Tac-Toe, Rock Paper Scissors,
-  Dino Arena, Blackjack and Sudoku, below. A person can join every one of them, any two
+- **Games** (`/games`): Snake, which the tab opens on, Pac-Man, Chess, Tic-Tac-Toe, Rock Paper
+  Scissors, Dino Arena, Blackjack and Sudoku, below. A person can join every one of them, any two
   loaded models can play each other in every one of them, and three can be played against a
   language model.
 - **Compare** (`/compare`): one question, asked of every loaded model at once. Choose the
@@ -1056,6 +1056,7 @@ one entry per model on the MLA (load more in Settings).
 | Chess, Tic-Tac-Toe | either side, **White**/**Black** or **X**/**O** | click the board | plays its side by the same question (or **Alpha-Beta** / **Minimax**, below) |
 | Rock Paper Scissors | **Against** | you throw (buttons, or R, P, S); the model has decided before you do | each reads the other's throws |
 | Snake | **Against ...**, then **Start Race** (or Space) | your own board, steered with the arrow keys | its own snake on the same course; they race again when both are done |
+| Pac-Man | **Against ...**, then **Start Race** (or Space) | your own maze with the same ghosts, steered with the arrow keys | its own maze; they race again when both are done |
 | Dino Arena | **Against ...**, then **Start Race** (or Space) | your own lane on the same course | its own lane; they race again when both have crashed |
 | Blackjack | **Second Seat** | your own hand from the same deck, against the same dealer | its own hand, at a flat bet of 1 |
 | Sudoku | **Players** | You and the model, a cell each in turn | **Two Models, in Turns** |
@@ -1107,9 +1108,9 @@ once. Tried with Gemma 4 E2B: it answered a chess move in about 0.3 s, against 3
 of Laya's thirty decisions; and with the 230-million-parameter LFM2.5, which threw rock every
 round and lost 16 of 17 to Laya reading that.
 
-## Blackjack, Snake, Sudoku, Tic-Tac-Toe and Rock Paper Scissors: games on a general model
+## Blackjack, Snake, Pac-Man, Sudoku, Tic-Tac-Toe and Rock Paper Scissors: games on a general model
 
-These five use a Laya checkpoint as it ships, with no fine-tuning. Any deployed model can be
+These six use a Laya checkpoint as it ships, with no fine-tuning. Any deployed model can be
 tried by loading it in the model manager; the numbers below are for the English one. Asking a general model
 to play only works if the question is put a particular way, and how that was found is the
 useful part (the modules in `games/`, one per game):
@@ -1188,6 +1189,38 @@ picks the best-described move); the descriptions get worse, and the always-best 
 20 x 14 drops from 61 food per game to 55 seeing 12 squares, 47 seeing 8, 36 seeing 5 and
 about 26-29 seeing 3 or fewer (`node tools/sim_snake.js 300 20 14 5`).
 
+### Pac-Man
+
+`/games/pacman`: Pac-Man in a maze of 19 x 21 squares drawn for this game, with four ghosts
+that chase in the arcade's manners (Blinky makes for Pac-Man, Pinky for four squares ahead of
+it, Inky for a point worked out from both, Clyde for Pac-Man until he is close), take turns
+at scattering to their corners, and turn blue for a while when Pac-Man eats a power pellet.
+Three lives; a level is cleared when every dot is eaten, and the ghosts are faster in each
+level, from 0.8 of Pac-Man's pace to 1.1 of it.
+
+It is asked the way Snake is, with one decision a step. The options are the ways Pac-Man can
+go from where it stands (two to four of `go up`, `go left`, `go down`, `go right`), each
+described with one of Snake's phrases with a ghost where Snake has a wall: `safe and toward the food`, `safe but
+away from the food`, `a ghost is near, dangerous`, `caught by a ghost, Pac-Man dies`. The
+harness tries each step to see whether a ghost would catch Pac-Man, calls a way dangerous
+when it closes in on a ghost four squares away or nearer, and otherwise says whether the
+shortest way to the food gets shorter; the food is a blue ghost Pac-Man can still catch, if
+there is one, and otherwise the dots.
+
+The wording matters as much as it did for Snake. A first one, with five phrases (a blue
+ghost apart from the dots, "dots" for food, "toward a ghost" and "into a ghost" for the
+dangers), had the general model pick a best-described way in 802 of the 1203 positions that
+offer a safe one, and a dangerous way 30 times. Snake's phrases got 535 of 536, and the one
+miss was at corners Pac-Man passes often: offered `down` toward the food and `right` away
+from it, the model took `right`, the word that also means "correct", and in play Pac-Man
+went back and forth there. Named `go down` and `go right` it picks a best-described way in
+all 536 and a dangerous one never (`tools/pacman_check.py`), at 19 ms a decision.
+
+A player that always picks a best-described way scores 13,600 points a game on average and
+clears 1.4 levels; one that goes any open way at random scores 440 and clears none
+(`node tools/sim_pacman.js`). In about one move in twenty the best-described player has
+nothing safe on offer, and each of the four ghosts catches it in the end, Blinky most often.
+
 ### Sudoku
 
 `/games/sudoku`: Laya fills a 9 x 9 puzzle, two decisions a cell. The model is not shown the
@@ -1249,8 +1282,10 @@ made at random nothing can win, and it does not.
 ```bash
 python3 tools/blackjack_check.py      # all 15 blackjack texts on the board, and the chart
 python3 tools/snake_check.py          # all 64 combinations of move descriptions on the board
+python3 tools/pacman_check.py         # all 608 Pac-Man questions, through the app's loaded model
 node tools/sim_blackjack.js           # what remembering the cards is worth
 node tools/sim_snake.js               # what the move descriptions are worth (add: games columns rows sight)
+node tools/sim_pacman.js              # Pac-Man: what the descriptions are worth, against moving at random
 python3 tools/sudoku_check.py         # the Sudoku cell and digit questions on the board
 node tools/sim_sudoku.js              # what the descriptions are worth at each level, and the puzzles
 python3 tools/tictactoe_check.py      # every Tic-Tac-Toe question, both ways of looking, on the board

@@ -9,8 +9,8 @@ browser request to it as one JSON line.
     /showcase   the story of the demo as a deck of slides, for presenting
     /debate     a yes-or-no question answered live as it is typed
     /questions  question answering with your own questions and options
-    /games      games a model plays, and people with it: Snake (the default), Chess, Tic-Tac-Toe,
-                Rock Paper Scissors, Dino Arena, Blackjack, Sudoku
+    /games      games a model plays, and people with it: Snake (the default), Pac-Man, Chess,
+                Tic-Tac-Toe, Rock Paper Scissors, Dino Arena, Blackjack, Sudoku
     /models     any page with Settings open: the model manager (every model on the board or
                 on Hugging Face, with download, load, unload and delete)
 
@@ -1066,7 +1066,7 @@ class LLM:
 
 
 PAGES = {"/": "landing.html", "/showcase": "showcase.html", "/debate": "debate.html", "/questions": "index.html", "/games": "snake.html",
-         "/games/snake": "snake.html", "/games/chess": "chess.html", "/games/tictactoe": "tictactoe.html",
+         "/games/snake": "snake.html", "/games/pacman": "pacman.html", "/games/chess": "chess.html", "/games/tictactoe": "tictactoe.html",
          "/games/rps": "rps.html", "/games/dino": "games.html", "/games/blackjack": "blackjack.html",
          "/games/sudoku": "sudoku.html", "/compare": "compare.html", "/vision": "vision.html",
          "/models": "landing.html"}        # the landing page, on which settings.js opens Settings
