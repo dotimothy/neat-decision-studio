@@ -5,6 +5,8 @@ decision models: a ModernBERT-style encoder with a small decision head. A model 
 (text or JSON) and a typed question (`choice`, `score` or `noul`) and returns a probability
 for each option in one forward pass, with no text generation.
 
+**Project page: [dotimothy.github.io/neat-decision-studio](https://dotimothy.github.io/neat-decision-studio/)**
+
 ![Debate: a yes-or-no question answered as it is typed, in about 19 ms per decision](docs/debate.gif)
 
 *The Debate page, recorded on a Modalix DevKit in real time: the model answers again on every
@@ -382,7 +384,8 @@ webapp/               example web app (stdlib Python server; question, games and
   static/brand/, fonts/ marks and fonts taken from SiMa.ai's NEAT GenAI Studio example
 games/                per game: what the model is asked and why, and the reference policy
 setup.sh, run.sh      board-side: build once, start the app, update it
-docs/                 the recordings of the demo shown above
+docs/                 the recordings of the demo shown above, and the project page on GitHub
+                      Pages (index.html; assets/ copies webapp/static's styles, fonts and marks)
 tools/                reference dump, ONNX check, board parity, agreement, I/O shape probe,
                       game-head training, and per game a board check and a simulation,
                       publish_hub.py, which uploads compiled models to Hugging Face, and for

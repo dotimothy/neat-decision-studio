@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Neat Decision Studio</title>
+<meta name="description" content="System-1 decision models running entirely on the SiMa.ai Modalix MLSoC: an answer in about 19 ms, with no cloud and no GPU.">
+<meta property="og:title" content="Neat Decision Studio">
+<meta property="og:description" content="Decisions at Reflex Speed, at the Edge. System-1 decision models on the SiMa.ai Modalix MLSoC.">
+<meta property="og:image" content="https://dotimothy.github.io/neat-decision-studio/showcase.png">
+<link rel="icon" type="image/svg+xml" href="assets/brand/neat-decision.svg">
+<!-- The project's page on GitHub Pages, served from this folder. It wears the app's own look:
+     assets/ holds copies of webapp/static's neat.css, theme.js, fonts and brand images, and the
+     pictures beside this file are the README's recordings of the app on a Modalix DevKit. -->
+<link rel="stylesheet" href="assets/neat.css">
+<script src="assets/theme.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+  body { margin: 0; color: var(--ink); font-size: 16px; }
+  a { color: var(--accent-strong); }
+  main { flex: 1; }
+  .grad { background: var(--spectrum); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text;
+          -webkit-text-fill-color: transparent; animation: sweep 6s ease-in-out infinite alternate; }
+  @keyframes sweep { to { background-position: 100% 0; } }
+  @keyframes float { 50% { transform: translateY(-9px); } }
+  @property --turn { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+  @keyframes turn { to { --turn: 360deg; } }
+  @keyframes drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(60px, 34px) scale(1.18); } }
+
+  /* The bar: the app's header, with the page's sections for tabs. */
+  header.app-header nav a.here { color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+                                 border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); font-weight: 600; }
+  .header-button svg { display: block; }
+  @media (max-width: 980px) { header.app-header nav { display: none; } }
+
+  /* Bands down the page, each with the showcase's eyebrow, headline and lede. */
+  .band { position: relative; padding: 76px 24px; border-radius: 0; box-shadow: none; }
+  .band.alt { background: color-mix(in srgb, var(--panel) 55%, transparent); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .wrap { width: 100%; max-width: 1180px; margin: 0 auto; }
+  .eyebrow { display: block; font-size: 12.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-strong); margin-bottom: 12px; }
+  h1.big { margin: 0; font-size: clamp(38px, 5.6vw, 66px); line-height: 1.05; letter-spacing: -.035em; }
+  h2 { margin: 0; font-size: clamp(28px, 3.6vw, 42px); line-height: 1.12; letter-spacing: -.03em; color: var(--ink); text-transform: none; font-weight: 700; }
+  .lede { margin: 16px 0 0; font-size: clamp(16px, 1.5vw, 19px); color: var(--muted); max-width: 66ch; }
+  .foot { margin-top: 22px; color: var(--muted); font-size: 14.5px; max-width: 86ch; }
+  code { font: 13.5px var(--mono); background: var(--chip); border-radius: 6px; padding: 2px 7px; }
+  /* What is in a band arrives as it scrolls into view. */
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s cubic-bezier(.2, .7, .2, 1); }
+  .reveal.in { opacity: 1; transform: none; }
+
+  /* The opening. */
+  .hero { overflow: hidden; padding-top: 64px; padding-bottom: 84px; }
+  .glow { position: absolute; z-index: -1; width: 560px; height: 560px; border-radius: 50%; pointer-events: none; opacity: .5; top: -160px; left: -160px;
+          background: radial-gradient(circle, color-mix(in srgb, #16c8a6 32%, transparent), transparent 66%); animation: drift 14s ease-in-out infinite alternate; }
+  .glow.b { left: auto; right: -200px; top: 40px; background: radial-gradient(circle, color-mix(in srgb, #3a86ec 28%, transparent), transparent 66%); animation-duration: 18s; }
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 48px; align-items: center; }
+  @media (max-width: 960px) { .split { grid-template-columns: minmax(0, 1fr); gap: 32px; } }
+  .cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px; border-radius: 999px; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer;
+         color: var(--ink); background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
+  .btn:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent-strong); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { background: var(--accent-strong); color: var(--accent-ink); }
+  .btn svg { width: 17px; height: 17px; flex: none; }
+  .builton { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 24px; color: var(--muted); font-size: 14px; }
+  .builton .sima { height: 22px; width: auto; }
+  .builton .on-dark { display: none; }
+  @media (prefers-color-scheme: dark) { .builton .on-dark { display: inline; } .builton .on-light { display: none; } }
+  .builton .neat-name { color: var(--ink); font-size: 15px; }
+  .statstrip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 30px; max-width: 560px; }
+  .statstrip .num { font-size: clamp(24px, 2.6vw, 34px); font-weight: 700; letter-spacing: -.03em; }
+  .statstrip .lbl { color: var(--muted); font-size: 13px; }
+  /* A recording in a window, with the showcase's turning spectrum round its edge. */
+  .screen { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-md); overflow: visible; }
+  .screen.floats { animation: float 7s ease-in-out infinite; }
+  .screen::before { content: ""; position: absolute; inset: -2px; border-radius: calc(var(--radius) + 2px); padding: 2px; pointer-events: none; opacity: .75;
+                    background: conic-gradient(from var(--turn), #16c8a6, #4bb54a, #a9c81c, #3a86ec, #f2801d, #16c8a6);
+                    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+                    animation: turn 6s linear infinite; }
+  .screen .chrome { display: flex; align-items: center; gap: 7px; padding: 10px 14px; border-bottom: 1px solid var(--line); font: 12px var(--mono); color: var(--faint); }
+  .screen .chrome i { width: 10px; height: 10px; border-radius: 50%; background: var(--track); }
+  .screen .chrome span { margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .screen img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; border-radius: 0 0 var(--radius) var(--radius); background: var(--chip); }
+  .caption { margin: 12px 4px 0; color: var(--muted); font-size: 13.5px; }
+
+  /* Cards, in rows that always hold the same number. */
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 30px; }
+  .cards.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 1000px) { .cards.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 900px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 560px) { .cards.four { grid-template-columns: minmax(0, 1fr); } }
+  .card { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 18px;
+          text-decoration: none; color: var(--ink); font-family: inherit; transition: .16s ease; }
+  .card .tag { font-size: 11.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--accent-strong); }
+  .card h3 { margin: 6px 0 6px; font-size: 18px; letter-spacing: -.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .card pre { position: relative; margin: 12px 0 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--field); border: 1px solid var(--line);
+              font: 12.5px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .card.chip { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 10px; align-items: center; }
+  .card.chip img { width: 96px; filter: drop-shadow(0 6px 14px color-mix(in srgb, var(--accent) 30%, transparent)); animation: float 5s ease-in-out infinite; }
+  .bars { margin-top: 12px; display: grid; gap: 6px; font: 12.5px var(--mono); }
+  .bars div { display: grid; grid-template-columns: 74px minmax(0, 1fr) 46px; gap: 8px; align-items: center; }
+  .bars u { display: block; height: 8px; border-radius: 999px; background: var(--track); overflow: hidden; text-decoration: none; }
+  .bars u i { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--accent); transition: width 1.1s .5s cubic-bezier(.2, .7, .2, 1); }
+  .in .bars u i { width: var(--w); }
+  .bars span:last-child { text-align: right; color: var(--muted); }
+
+  /* The studio's pages, one at a time behind tabs. */
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 28px; }
+  .tabs button { display: inline-flex; align-items: center; gap: 8px; font: inherit; font-size: 14.5px; color: var(--muted); background: var(--panel); border: 1px solid var(--line);
+                 border-radius: 999px; padding: 7px 16px; cursor: pointer; box-shadow: var(--shadow-sm); }
+  .tabs button img { width: 18px; height: 18px; }
+  .tabs button[aria-selected="true"] { color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+                                       border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); font-weight: 600; }
+  .studio { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 36px; align-items: center; margin-top: 22px; }
+  @media (max-width: 960px) { .studio { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+  .studio h3 { margin: 0; font-size: 24px; letter-spacing: -.02em; }
+  .studio p { color: var(--muted); }
+  .studio ul { margin: 12px 0 0; padding-left: 20px; color: var(--muted); }
+  .studio li { margin: 4px 0; }
+
+  /* The games, each with its recording. */
+  .game { padding: 0; overflow: hidden; }
+  a.game:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+  .game img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; background: var(--chip); border-bottom: 1px solid var(--line); }
+  .game div { padding: 14px 16px 16px; }
+  .game h3 { margin: 0 0 4px; font-size: 17px; }
+  .game p { font-size: 13.5px; }
+
+  /* The models, as the app's Settings lists them. */
+  .tablewrap { overflow-x: auto; margin-top: 28px; border-radius: var(--radius); }
+  .table { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+           box-shadow: var(--shadow-sm); overflow: hidden; font-size: 14.5px; }
+  .table th { text-align: left; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); padding: 12px 16px 8px; white-space: nowrap; }
+  .table td { padding: 11px 16px; border-top: 1px solid var(--line); vertical-align: top; }
+  .table td b { display: block; }
+  .table td .about { display: block; color: var(--muted); font-size: 13px; max-width: 46ch; }
+  .table td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .table td.num small { display: block; color: var(--faint); font-size: 12px; }
+  .table a { text-decoration: none; font-weight: 600; white-space: nowrap; }
+  .table a:hover { text-decoration: underline; }
+  .pill { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; border: 1px solid currentColor; white-space: nowrap; }
+  .pill.open { color: var(--good); } .pill.lfm { color: var(--warn); }
+  .listed { margin-top: 10px; color: var(--faint); font-size: 12.5px; }
+  .listed i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); margin-right: 7px; }
+  .listed i.on { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); }
+
+  /* Install: three steps, each with what to type. */
+  .step { counter-increment: step; }
+  .step .tag::before { content: "0" counter(step) " \00b7  "; }
+  .install { counter-reset: step; }
+  .copy { position: absolute; top: 7px; right: 7px; font: 12px 'Inter', system-ui, sans-serif; color: var(--muted); background: var(--chip); border: 1px solid var(--line);
+          border-radius: 999px; padding: 2px 10px; cursor: pointer; opacity: 0; transition: opacity .16s ease; }
+  pre:hover .copy, .copy:focus { opacity: 1; }
+  @media (hover: none) { .copy { opacity: 1; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .reveal { opacity: 1; transform: none; }
+    .glow { display: none; }
+    html { scroll-behavior: auto; }
+  }
+  @media (max-width: 760px) { .band { padding: 56px 16px; } .statstrip { gap: 8px; } }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <a class="brand" href="#top">
+    <img src="assets/brand/neat-decision.svg" alt="Neat Decision Studio">
+    <span class="brand-text"><span class="brand-title">Neat Decision Studio</span>
+      <span class="brand-sub">Running on <strong class="neat-name"><img src="assets/brand/neat-mark.png" alt="">SiMa.ai Palette Neat</strong></span></span>
+  </a>
+  <nav id="tabs"><a href="#idea">The Idea</a><a href="#studio">The Studio</a><a href="#games">Games</a><a href="#models">Models</a><a href="#install">Install</a></nav>
+  <span class="header-tools">
+    <span class="header-pill" title="Every model runs on the board itself"><i></i>Modalix MLSoC · on-device</span>
+    <button class="header-button" id="dark" type="button" aria-label="Dark mode"></button>
+    <a class="header-button" href="https://huggingface.co/dotimothy/sima-laya" title="The Models on Hugging Face" aria-label="The models on Hugging Face" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><path d="M3.3 7.6 12 12.5l8.7-4.9M12 22V12.5"/></svg></a>
+    <a class="header-button" href="https://github.com/dotimothy/neat-decision-studio" title="The Code on GitHub" aria-label="The code on GitHub" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.82 1.19 3.08 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+  </span>
+</header>
+
+<main id="top">
+
+  <!-- The opening -->
+  <section class="band hero">
+    <i class="glow"></i><i class="glow b"></i>
+    <div class="wrap split">
+      <div class="reveal">
+        <span class="eyebrow">Powered by LLiMa &middot; Built with <span class="neat-name"><img src="assets/brand/neat-mark.png" alt="">Palette Neat</span></span>
+        <h1 class="big">Decisions at Reflex Speed.<br><span class="grad">At the Edge.</span></h1>
+        <p class="lede">Neat Decision Studio runs System-1 decision models on the SiMa.ai Modalix MLSoC. A model reads a piece of text and a typed
+          question and returns a probability for every option in a single forward pass, <b>entirely on the Modalix MLA</b>. No cloud, no GPU.</p>
+        <div class="cta">
+          <a class="btn primary" href="#install"><span class="go">Get Started</span></a>
+          <a class="btn" href="https://github.com/dotimothy/neat-decision-studio" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.82 1.19 3.08 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>
+            View on GitHub</a>
+        </div>
+        <div class="statstrip">
+          <div><div class="num grad">19 ms</div><div class="lbl">per decision</div></div>
+          <div><div class="num">1</div><div class="lbl">MLA graph, 0 CPU layers</div></div>
+          <div><div class="num">0</div><div class="lbl">cloud calls</div></div>
+        </div>
+        <div class="builton">
+          <span>Built on</span>
+          <img class="sima on-light" src="assets/brand/sima-on-light.png" alt="SiMa.ai"><img class="sima on-dark" src="assets/brand/sima-on-dark.png" alt="SiMa.ai">
+          <span>&times;</span>
+          <strong class="neat-name"><img src="assets/brand/neat-mark.png" alt="">Palette Neat</strong>
+        </div>
+      </div>
+      <div class="reveal">
+        <div class="screen floats">
+          <div class="chrome"><i></i><i></i><i></i><span>http://&lt;board-ip&gt;:8095/debate</span></div>
+          <img src="debate.gif" width="960" height="600" alt="The Debate page: a yes-or-no question answered again at every keystroke, in about 19 ms each time">
+        </div>
+        <p class="caption">Recorded on a Modalix DevKit in real time: the model answers again at every keystroke, 19 ms on the MLA each time.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- The idea -->
+  <section class="band alt" id="idea">
+    <div class="wrap">
+      <div class="reveal">
+        <span class="eyebrow">The Idea</span>
+        <h2>A Language Model Writes an Answer. <span class="grad">A Decision Model Picks One.</span></h2>
+        <p class="lede">A language model produces its answer token by token. A decision model scores the options it is given, all at once,
+          which is why it fits a reflex: routing, triage, gating an action, or every move of a game.</p>
+      </div>
+      <div class="cards reveal">
+        <div class="card"><span class="tag">One Pass</span><h3>No Text Generation</h3><p>The answer is a probability per option, read off a single forward pass of the encoder and its decision head.</p></div>
+        <div class="card"><span class="tag">Typed</span><h3>Choose, Score, Yes or No</h3><p>Three kinds of question, with your own options. The answer space is built for every request.</p></div>
+        <div class="card"><span class="tag">Reflex</span><h3>About 50 a Second</h3><p>At 19 ms a decision, one board answers a stream of questions, or plays a game in real time.</p></div>
+      </div>
+      <div class="cards reveal" style="margin-top:14px">
+        <div class="card"><span class="tag">01 &middot; State and Question</span><h3>Say What to Decide</h3>
+          <p>Any text or JSON, and a question with its options.</p>
+          <pre>"We were billed twice for March."
+Which department? billing / technical / other</pre></div>
+        <div class="card chip"><div><span class="tag">02 &middot; On the MLA</span><h3>One Pass, on the Chip</h3>
+          <p>The whole encoder and decision head run as a single graph on the Modalix MLA. Only the tokenizer and a table lookup stay on the CPU.</p></div>
+          <img src="assets/brand/modalix.svg" alt="The SiMa.ai Modalix MLSoC"></div>
+        <div class="card"><span class="tag">03 &middot; Probabilities</span><h3>Read the Answer</h3>
+          <p>A probability for each option, and how sure the model is that it should act.</p>
+          <div class="bars">
+            <div><span>billing</span><u><i style="--w:98.9%"></i></u><span>98.9%</span></div>
+            <div><span>technical</span><u><i style="--w:0.7%"></i></u><span>0.7%</span></div>
+            <div><span>other</span><u><i style="--w:0.5%"></i></u><span>0.5%</span></div>
+          </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- The studio -->
+  <section class="band" id="studio">
+    <div class="wrap">
+      <div class="reveal">
+        <span class="eyebrow">The Studio</span>
+        <h2>A Web App on the Board, <span class="grad">Open in Any Browser.</span></h2>
+        <p class="lede">Every page shows the time the MLA took for the decisions on screen. Several models can be on the MLA at once,
+          and each page can ask any of them.</p>
+      </div>
+      <div class="tabs reveal" role="tablist" id="pages"></div>
+      <div class="studio reveal">
+        <div class="screen"><div class="chrome"><i></i><i></i><i></i><span id="pageUrl"></span></div>
+          <img id="pageShot" src="debate.gif" width="960" height="600" alt=""></div>
+        <div id="pageText"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Games -->
+  <section class="band alt" id="games">
+    <div class="wrap">
+      <div class="reveal">
+        <span class="eyebrow">Games</span>
+        <h2>Every Move Is <span class="grad">a Decision on the Chip.</span></h2>
+        <p class="lede">In each game a model makes every decision, and the page shows what it was told and how it chose. Any loaded model
+          can take a seat, so two models play each other; a person can take one too, and in three of them the other side can be a
+          language model served by NEAT GenAI Studio on the same board.</p>
+      </div>
+      <div class="cards four reveal" id="gameCards"></div>
+    </div>
+  </section>
+
+  <!-- Models -->
+  <section class="band" id="models">
+    <div class="wrap">
+      <div class="reveal">
+        <span class="eyebrow">Models</span>
+        <h2>Compiled for the MLA, <span class="grad">Measured on Real Silicon.</span></h2>
+        <p class="lede">Each model is compiled with the LLiMa compiler framework and published on Hugging Face. The app's Settings
+          downloads one to the board, checks every file against its sum and loads it on the MLA, beside the ones already there.</p>
+      </div>
+      <div class="tablewrap reveal">
+        <table class="table">
+          <thead><tr><th>Model</th><th>Encoder</th><th>Shortest Graph</th><th>Download</th><th>Repository</th><th>Licence</th></tr></thead>
+          <tbody id="modelRows"></tbody>
+        </table>
+      </div>
+      <p class="listed" id="listed"><i></i>The list as published.</p>
+      <p class="foot">Latency is one pass on the MLA, measured on a Modalix DevKit, on the model's shortest graph. The Laya graphs are a
+        single MLA stage each (the compiler reports <code>MLA: 1, A65: 0</code>); CLM and d1 3B are chains of graphs. Against the
+        PyTorch originals, the general model gives the same decision in 100 of 100 cases.</p>
+    </div>
+  </section>
+
+  <!-- Install -->
+  <section class="band alt" id="install">
+    <div class="wrap">
+      <div class="reveal">
+        <span class="eyebrow">Install</span>
+        <h2>From a Fresh DevKit <span class="grad">to a Decision in Minutes.</span></h2>
+        <p class="lede">No compiler and no host: the runtime is built on the board, and the app downloads the compiled models from
+          Hugging Face. You need a Modalix DevKit on the SDK's eLxr image with internet access, and room on its NVMe.</p>
+      </div>
+      <div class="cards install reveal">
+        <div class="card step"><span class="tag">Prerequisites</span><h3>The LLiMa Runtime</h3>
+          <p>The runtime links against LLiMa's development package; the web app needs only Python's standard library.</p>
+<pre>sima-cli neat install llima
+sudo apt install cmake g++ python3 \
+  nlohmann-json3-dev</pre></div>
+        <div class="card step"><span class="tag">On the Board</span><h3>Clone, Set Up, Run</h3>
+          <p><code>setup.sh</code> checks the prerequisites, builds the runtime and adds a <code>neat-decision</code> shortcut.</p>
+<pre>cd /media/nvme
+git clone https://github.com/dotimothy/neat-decision-studio.git
+cd neat-decision-studio
+./setup.sh
+./run.sh</pre></div>
+        <div class="card step"><span class="tag">In a Browser</span><h3>Download, Load, Ask</h3>
+          <p>Open Settings, press <b>Download</b> on a model and <b>Load</b> once it has arrived. It is on the MLA a few seconds later.</p>
+<pre>http://&lt;board-ip&gt;:8095/models</pre>
+          <p style="margin-top:10px">Laya (about 3 GB) is the general model the pages are written for; Laya INT8 (0.7 GB) is the quickest to fetch.</p></div>
+      </div>
+      <p class="foot reveal">The <a href="https://github.com/dotimothy/neat-decision-studio#readme">README</a> covers the rest: keeping the models
+        elsewhere, the terminal version (<code>neat-decision --cli</code>), compiling the models yourself, and how each game is asked.</p>
+    </div>
+  </section>
+
+  <!-- Built with -->
+  <section class="band" id="built">
+    <div class="wrap">
+      <div class="reveal">
+        <span class="eyebrow">How It Was Made</span>
+        <h2>Built with <span class="neat-name"><img src="assets/brand/neat-mark.png" alt=""><span class="grad">SiMa.ai Palette Neat.</span></span></h2>
+      </div>
+      <div class="cards reveal">
+        <div class="card"><span class="tag">Compile</span><h3>One Graph per Length</h3><p>The checkpoints are built on the LLiMa compiler framework into MLA graphs, one for each sequence length.</p></div>
+        <div class="card"><span class="tag">Run</span><h3>A Small C++ Runtime</h3><p>Tokenizing and a table lookup on the CPU, everything else on the MLA, behind one JSON line per request.</p></div>
+        <div class="card"><span class="tag">Show</span><h3>This Studio</h3><p>A web app in the Python standard library, a terminal prompt, and compiled models on Hugging Face.</p></div>
+      </div>
+      <div class="cta reveal">
+        <a class="btn primary" href="https://github.com/dotimothy/neat-decision-studio" target="_blank" rel="noopener"><span class="go">The Code</span></a>
+        <a class="btn" href="https://huggingface.co/dotimothy/sima-laya" target="_blank" rel="noopener">Laya Models</a>
+        <a class="btn" href="https://huggingface.co/dotimothy/sima-clm" target="_blank" rel="noopener">CLM Model</a>
+        <a class="btn" href="https://huggingface.co/dotimothy/sima-d1" target="_blank" rel="noopener">d1 Models</a>
+      </div>
+      <p class="foot reveal">The code is Apache-2.0. The models are upstream's: Convai Innovations' <a href="https://github.com/NandhaKishorM/laya" target="_blank" rel="noopener">Laya</a>
+        (Apache-2.0), Contrastive-LM's <a href="https://github.com/Contrastive-LM/CLM" target="_blank" rel="noopener">CLM</a> on Qwen3-8B (Apache-2.0),
+        and LiquidAI's <a href="https://huggingface.co/blog/LiquidAI/open-d1" target="_blank" rel="noopener">d1</a>, under the LFM Open License v1.0, which
+        limits commercial use to organisations under 10 million dollars of annual revenue. The chess model is datafreak's
+        <a href="https://huggingface.co/datafreak/laya-chess" target="_blank" rel="noopener">LayaChess</a>.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="app-footer">
+  <span>Powered by <strong class="neat-name"><img src="assets/brand/neat-mark.png" alt="">SiMa.ai Palette Neat</strong> on the Modalix MLSoC</span>
+  <img class="on-light" src="assets/brand/sima-on-light.png" alt="SiMa.ai">
+  <img class="on-dark" src="assets/brand/sima-on-dark.png" alt="SiMa.ai">
+  <span id="copyright">&copy; SiMa.ai, Inc.</span>
+  <span>Laya models by Convai Innovations, Apache-2.0</span>
+</footer>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const make = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
+$("copyright").textContent = `© ${new Date().getFullYear()} SiMa.ai, Inc.`;
+
+// ---- Dark mode, on or off (theme.js): a moon while it is off, a sun while it is on.
+function showTheme() {
+  const dark = window.theme.current() === "dark";
+  $("dark").title = dark ? "Dark Mode Is On: Turn It Off" : "Dark Mode Is Off: Turn It On";
+  $("dark").setAttribute("aria-pressed", String(dark));
+  $("dark").innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    + (dark ? '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'
+            : '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>') + "</svg>";
+}
+$("dark").onclick = () => window.theme.toggle();
+addEventListener("themechange", showTheme);
+showTheme();
+
+// ---- The studio's pages, from the README's recordings.
+const PAGES = [
+  { name: "Debate", path: "/debate", shot: "debate.gif", emoji: "debate",
+    text: "Type a yes-or-no question. The answer and its pie chart follow every keystroke, a new decision on the MLA each time.",
+    points: ["About 19 ms a decision with the general model", "Any loaded model can answer"] },
+  { name: "Questions", path: "/questions", shot: "questions.gif", emoji: "questions",
+    text: "A state, and any number of typed questions about it with your own options: route a ticket, score its urgency, gate an action.",
+    points: ["Choose, score or yes-or-no", "One forward pass a question"] },
+  { name: "Vision", path: "/vision", shot: "vision.gif", emoji: "vision",
+    text: "For the models that read pictures: a set of pictures with the questions asked of each, every model's answers beside what a person would say, or a camera or video decided frame after frame.",
+    points: ["d1 Omni and d1 3B side by side, scored", "A picture read once for several questions"] },
+  { name: "Compare", path: "/compare", shot: "compare.gif", emoji: "compare",
+    text: "Load several models at once and ask them all the same thing at the same moment: who agrees, who differs, and how fast.",
+    points: ["Here three Layas and CLM, on an 8-billion-parameter encoder", "Every model on the MLA at once"] },
+  { name: "Settings", path: "/models", shot: "settings.gif", emoji: "models",
+    text: "The model manager, behind the gear on every page: what is on the board, the MLA's memory and who holds it, and what Hugging Face has to download.",
+    points: ["Download, load, unload and delete", "Downloads checked against SHA-256 sums"] },
+];
+function showPage(index) {
+  const page = PAGES[index];
+  [...$("pages").children].forEach((tab, i) => { tab.setAttribute("aria-selected", String(i === index)); tab.tabIndex = i === index ? 0 : -1; });
+  $("pageShot").src = page.shot;
+  $("pageShot").alt = `The ${page.name} page, recorded on a Modalix DevKit`;
+  $("pageUrl").textContent = `http://<board-ip>:8095${page.path}`;
+  $("pageText").replaceChildren(make("h3", { textContent: page.name }), make("p", { textContent: page.text }),
+                                make("ul", {}, ...page.points.map((point) => make("li", { textContent: point }))));
+}
+PAGES.forEach((page, i) => {
+  const tab = make("button", { type: "button", role: "tab", onclick: () => showPage(i) },
+                   make("img", { src: `assets/brand/emoji-${page.emoji}.svg`, alt: "" }), page.name);
+  $("pages").append(tab);
+});
+$("pages").addEventListener("keydown", (event) => {
+  const at = PAGES.findIndex((_, i) => $("pages").children[i].getAttribute("aria-selected") === "true");
+  const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+  if (step) { const next = (at + step + PAGES.length) % PAGES.length; showPage(next); $("pages").children[next].focus(); }
+});
+showPage(0);
+// The pictures of the other pages arrive before they are asked for.
+addEventListener("load", () => { for (const page of PAGES.slice(1)) new Image().src = page.shot; });
+
+// ---- The games, in the order the app's switcher lists them.
+const GAMES = [
+  ["Snake", "snake.gif", "One decision per move, among three moves described by where each leads. Race it."],
+  ["Pac-Man", "pacman.png", "Four ghosts, one decision a step: which way is safe and leads to the food. Race it."],
+  ["Chess", "chess.gif", "It rates every legal move, about thirty decisions a second."],
+  ["Tic-Tac-Toe", "tictactoe.gif", "One decision a move. Looking to the end of the game, it does not lose."],
+  ["Rock Paper Scissors", "rps.gif", "It reads your last throws and says what you will throw next."],
+  ["Dino Arena", "dino.gif", "Run, jump or duck about 45 times a second. Race it yourself."],
+  ["Blackjack", "blackjack.gif", "Bets, doubles, hits and stands, remembering the cards. Sit down beside it."],
+  ["Sudoku", "sudoku.gif", "Which cell, then which digit: two decisions a cell. Take turns with it."],
+];
+const README = "https://github.com/dotimothy/neat-decision-studio#";
+$("gameCards").append(...GAMES.map(([name, shot, text]) => make("a", { className: "card game", href: README + (name === "Pac-Man" ? "pac-man" : "the-demo"), target: "_blank", rel: "noopener" },
+  make("img", { src: shot, alt: `${name} in Neat Decision Studio`, loading: "lazy", width: 960, height: 600 }),
+  make("div", {}, make("h3", { textContent: name }), make("p", { textContent: text })))));
+
+// ---- The models: the list the app downloads from, read from Hugging Face when it can be, and
+// otherwise as it was when this page was written.
+const HUB = "dotimothy/sima-laya";
+const PUBLISHED = [
+  { title: "Laya", about: "The general question model: routing, triage, moderation and yes-or-no questions about a piece of English text.",
+    encoder: "ModernBERT-large, 421M parameters", latency: { 128: 19.5, 256: 35.2, 512: 87.5 }, bytes: 3.27e9, repo: HUB, license: "Apache-2.0" },
+  { title: "Laya INT8", about: "The general model with its weights stored as 8-bit integers: 28% faster and a third smaller, slightly less exact.",
+    encoder: "ModernBERT-large, 421M parameters", latency: { 128: 14.0 }, bytes: 0.67e9, repo: HUB, license: "Apache-2.0" },
+  { title: "Laya typed-decisions", about: "Fine-tuned by upstream on typed-decision workflows, with graphs for inputs of up to 1024 tokens.",
+    encoder: "ModernBERT-large, 421M parameters", latency: { 128: 19.4, 512: 87.5, 1024: 282 }, bytes: 4.35e9, repo: HUB, license: "Apache-2.0" },
+  { title: "Laya multilingual", about: "The same questions in more than 100 languages, on a smaller encoder that answers about twice as fast.",
+    encoder: "mmBERT-base, 322M parameters", latency: { 128: 8.1, 256: 15.3, 512: 33.9, 1024: 116.5 }, bytes: 2.61e9, repo: HUB, license: "Apache-2.0" },
+  { title: "Laya-dino", about: "The English model with its decision head fine-tuned to play the Dino Arena game: run, jump or duck.",
+    encoder: "ModernBERT-large, 421M parameters", latency: { 64: 18.0 }, bytes: 0.95e9, repo: HUB, license: "Apache-2.0" },
+  { title: "CLM v0.1 8B", about: "A frozen Qwen3-8B reads the state and each option, and two small heads compare them; a new question takes about 0.3 s.",
+    encoder: "Qwen3-8B, 8.2B parameters, as a chain of 18 graphs", latency: { 128: 254 }, bytes: 9.12e9, repo: "dotimothy/sima-clm", license: "Apache-2.0" },
+  { title: "d1 Omni 600M", about: "LiquidAI's small d1: the same three kinds of question, about a text or about a picture.",
+    encoder: "LFM2.5-Encoder-350M and SigLIP2, 475M parameters", latency: { 128: 10, 512: 33 }, bytes: 1.56e9, repo: "dotimothy/sima-d1", license: "LFM Open License v1.0" },
+  { title: "d1 3B", about: "LiquidAI's large d1, LFM2.5-VL-3B asked as a decision model: questions about a text or a picture.",
+    encoder: "LFM2.5-VL-3B with a SigLIP2 vision tower, 3.1B parameters, as a chain of 8 graphs", latency: { 128: 92, 384: 228, 512: 310 }, bytes: 12.78e9,
+    repo: "dotimothy/sima-d1", license: "LFM Open License v1.0" },
+];
+function showModels(models) {
+  $("modelRows").replaceChildren(...models.map((model) => {
+    const [tokens, ms] = Object.entries(model.latency || {}).map(([t, v]) => [Number(t), Number(v)]).filter(([, v]) => v).sort((a, b) => a[1] - b[1])[0] || [];
+    const open = /apache/i.test(model.license);
+    const td = (className, ...children) => make("td", { className }, ...children);
+    return make("tr", {},
+      td("", make("b", { textContent: model.title }), make("span", { className: "about", textContent: model.about || "" })),
+      td("", model.encoder || ""),
+      td("num", ms ? `${ms} ms` : "–", ms ? make("small", { textContent: `${tokens} tokens` }) : ""),
+      td("num", model.bytes ? `${(model.bytes / 1e9).toFixed(1)} GB` : "–"),
+      td("", make("a", { href: `https://huggingface.co/${model.repo}`, target: "_blank", rel: "noopener", textContent: model.repo.split("/")[1] })),
+      td("", make("span", { className: "pill " + (open ? "open" : "lfm"), textContent: open ? "Apache-2.0" : "LFM Open v1.0", title: model.license })));
+  }));
+}
+showModels(PUBLISHED);
+(async () => {
+  try {
+    const list = await (await fetch(`https://huggingface.co/${HUB}/resolve/main/models.json`)).json();
+    const entries = ["models", "models_v2", "models_v3"].flatMap((key) => Object.values(list[key] || {}));
+    const models = entries.filter((e) => e && e.title).map((e) => ({
+      title: e.title, about: e.about, encoder: e.card?.encoder, latency: e.latency_ms, repo: e.repo || HUB,
+      bytes: (e.files || []).reduce((sum, file) => sum + (file.bytes || 0), 0), license: e.card?.license || "Apache-2.0" }));
+    if (!models.length) return;
+    showModels(models);
+    $("listed").replaceChildren(make("i", { className: "on" }), "Read just now from ", make("a", { href: `https://huggingface.co/${HUB}/blob/main/models.json`, target: "_blank", rel: "noopener", textContent: "models.json" }),
+      ", the list the app downloads from.");
+  } catch (_) { /* the list as published stays */ }
+})();
+
+// ---- Copy buttons on what is to be typed.
+for (const pre of document.querySelectorAll(".install pre")) {
+  const button = make("button", { className: "copy", type: "button", textContent: "Copy" });
+  const text = pre.textContent;
+  button.onclick = async () => {
+    try { await navigator.clipboard.writeText(text); button.textContent = "Copied"; } catch (_) { button.textContent = "Select and Copy"; }
+    setTimeout(() => { button.textContent = "Copy"; }, 1600);
+  };
+  pre.append(button);
+}
+
+// ---- Bands arrive as they scroll into view, and the bar marks the one being read.
+const seen = new IntersectionObserver((entries) => {
+  for (const entry of entries) if (entry.isIntersecting) { entry.target.classList.add("in"); seen.unobserve(entry.target); }
+}, { threshold: 0.12 });
+document.querySelectorAll(".reveal").forEach((node) => seen.observe(node));
+const tabs = [...$("tabs").children];
+const reading = new IntersectionObserver((entries) => {
+  for (const entry of entries) if (entry.isIntersecting) tabs.forEach((tab) => tab.classList.toggle("here", tab.hash === "#" + entry.target.id));
+}, { rootMargin: "-45% 0px -50% 0px" });
+tabs.forEach((tab) => { const band = document.querySelector(tab.hash); if (band) reading.observe(band); });
+</script>
+</body>
+</html>
