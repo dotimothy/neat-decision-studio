@@ -171,7 +171,7 @@
     <span class="brand-text"><span class="brand-title">Neat Decision Studio</span>
       <span class="brand-sub">Running on <strong class="neat-name"><img src="assets/brand/neat-mark.png" alt="">SiMa.ai Palette Neat</strong></span></span>
   </a>
-  <nav id="tabs"><a href="#idea">The Idea</a><a href="#studio">The Studio</a><a href="#games">Games</a><a href="#models">Models</a><a href="#install">Install</a></nav>
+  <nav id="tabs"><a href="#install">Install</a><a href="#idea">The Idea</a><a href="#studio">The Studio</a><a href="#games">Games</a><a href="#models">Models</a></nav>
   <span class="header-tools">
     <span class="header-pill" title="Every model runs on the board itself"><i></i>Modalix MLSoC · on-device</span>
     <button class="header-button" id="dark" type="button" aria-label="Dark mode"></button>
@@ -221,8 +221,40 @@
     </div>
   </section>
 
+  <!-- Install -->
+  <section class="band alt" id="install">
+    <div class="wrap">
+      <div class="reveal">
+        <span class="eyebrow">Install</span>
+        <h2>From a Fresh DevKit <span class="grad">to a Decision in Minutes.</span></h2>
+        <p class="lede">No compiler and no host: the runtime is built on the board, and the app downloads the compiled models from
+          Hugging Face. You need a Modalix DevKit on the SDK's eLxr image with internet access, and room on its NVMe.</p>
+      </div>
+      <div class="cards install reveal">
+        <div class="card step"><span class="tag">Prerequisites</span><h3>The LLiMa Runtime</h3>
+          <p>The runtime links against LLiMa's development package; the web app needs only Python's standard library.</p>
+<pre>sima-cli neat install llima
+sudo apt install cmake g++ python3 \
+  nlohmann-json3-dev</pre></div>
+        <div class="card step"><span class="tag">On the Board</span><h3>Clone, Set Up, Run</h3>
+          <p><code>setup.sh</code> checks the prerequisites, builds the runtime and adds a <code>neat-decision</code> shortcut.</p>
+<pre>cd /media/nvme
+git clone https://github.com/dotimothy/neat-decision-studio.git
+cd neat-decision-studio
+./setup.sh
+./run.sh</pre></div>
+        <div class="card step"><span class="tag">In a Browser</span><h3>Download, Load, Ask</h3>
+          <p>Open Settings, press <b>Download</b> on a model and <b>Load</b> once it has arrived. It is on the MLA a few seconds later.</p>
+<pre>http://&lt;board-ip&gt;:8095/models</pre>
+          <p style="margin-top:10px">Laya (about 3 GB) is the general model the pages are written for; Laya INT8 (0.7 GB) is the quickest to fetch.</p></div>
+      </div>
+      <p class="foot reveal">The <a href="https://github.com/dotimothy/neat-decision-studio#readme">README</a> covers the rest: keeping the models
+        elsewhere, the terminal version (<code>neat-decision --cli</code>), compiling the models yourself, and how each game is asked.</p>
+    </div>
+  </section>
+
   <!-- The idea -->
-  <section class="band alt" id="idea">
+  <section class="band" id="idea">
     <div class="wrap">
       <div class="reveal">
         <span class="eyebrow">The Idea</span>
@@ -255,7 +287,7 @@ Which department? billing / technical / other</pre></div>
   </section>
 
   <!-- The studio -->
-  <section class="band" id="studio">
+  <section class="band alt" id="studio">
     <div class="wrap">
       <div class="reveal">
         <span class="eyebrow">The Studio</span>
@@ -273,7 +305,7 @@ Which department? billing / technical / other</pre></div>
   </section>
 
   <!-- Games -->
-  <section class="band alt" id="games">
+  <section class="band" id="games">
     <div class="wrap">
       <div class="reveal">
         <span class="eyebrow">Games</span>
@@ -287,7 +319,7 @@ Which department? billing / technical / other</pre></div>
   </section>
 
   <!-- Models -->
-  <section class="band" id="models">
+  <section class="band alt" id="models">
     <div class="wrap">
       <div class="reveal">
         <span class="eyebrow">Models</span>
@@ -305,38 +337,6 @@ Which department? billing / technical / other</pre></div>
       <p class="foot">Latency is one pass on the MLA, measured on a Modalix DevKit, on the model's shortest graph. The Laya graphs are a
         single MLA stage each (the compiler reports <code>MLA: 1, A65: 0</code>); CLM and d1 3B are chains of graphs. Against the
         PyTorch originals, the general model gives the same decision in 100 of 100 cases.</p>
-    </div>
-  </section>
-
-  <!-- Install -->
-  <section class="band alt" id="install">
-    <div class="wrap">
-      <div class="reveal">
-        <span class="eyebrow">Install</span>
-        <h2>From a Fresh DevKit <span class="grad">to a Decision in Minutes.</span></h2>
-        <p class="lede">No compiler and no host: the runtime is built on the board, and the app downloads the compiled models from
-          Hugging Face. You need a Modalix DevKit on the SDK's eLxr image with internet access, and room on its NVMe.</p>
-      </div>
-      <div class="cards install reveal">
-        <div class="card step"><span class="tag">Prerequisites</span><h3>The LLiMa Runtime</h3>
-          <p>The runtime links against LLiMa's development package; the web app needs only Python's standard library.</p>
-<pre>sima-cli neat install llima
-sudo apt install cmake g++ python3 \
-  nlohmann-json3-dev</pre></div>
-        <div class="card step"><span class="tag">On the Board</span><h3>Clone, Set Up, Run</h3>
-          <p><code>setup.sh</code> checks the prerequisites, builds the runtime and adds a <code>neat-decision</code> shortcut.</p>
-<pre>cd /media/nvme
-git clone https://github.com/dotimothy/neat-decision-studio.git
-cd neat-decision-studio
-./setup.sh
-./run.sh</pre></div>
-        <div class="card step"><span class="tag">In a Browser</span><h3>Download, Load, Ask</h3>
-          <p>Open Settings, press <b>Download</b> on a model and <b>Load</b> once it has arrived. It is on the MLA a few seconds later.</p>
-<pre>http://&lt;board-ip&gt;:8095/models</pre>
-          <p style="margin-top:10px">Laya (about 3 GB) is the general model the pages are written for; Laya INT8 (0.7 GB) is the quickest to fetch.</p></div>
-      </div>
-      <p class="foot reveal">The <a href="https://github.com/dotimothy/neat-decision-studio#readme">README</a> covers the rest: keeping the models
-        elsewhere, the terminal version (<code>neat-decision --cli</code>), compiling the models yourself, and how each game is asked.</p>
     </div>
   </section>
 
