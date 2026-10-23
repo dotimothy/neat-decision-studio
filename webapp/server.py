@@ -1707,6 +1707,10 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        # A second stop (a launcher, or Ctrl-C again) would otherwise cut short the runtimes
+        # releasing their models, and print a traceback as it did.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         stopping.set()
         server.server_close()
         manager.stop()
