@@ -36,7 +36,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--reference", type=Path, default=Path("build/reference.npz"))
     ap.add_argument("--board", default="sima@192.168.91.225")
-    ap.add_argument("--remote", default="/media/nvme/laya")
+    ap.add_argument("--remote", default="/media/nvme/neat-decision-studio")
     ap.add_argument("--model-dir", default="model", help="model directory under --remote")
     ap.add_argument("--seq-len", type=int, default=0, help="pin one compiled graph")
     ap.add_argument("--text", action="store_true", help="check the full text path instead")

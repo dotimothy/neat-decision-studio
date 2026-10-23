@@ -5,7 +5,7 @@ Every reachable position is described both ways the harness can look (one move a
 the end of the game); each distinct question is asked once. The model should take a square
 with the best description on offer.
 
-    python3 tools/tictactoe_check.py [--remote /media/nvme/laya] [--model-dir model]
+    python3 tools/tictactoe_check.py [--remote /media/nvme/neat-decision-studio] [--model-dir model]
 """
 import argparse
 import json
@@ -20,7 +20,7 @@ from games import tictactoe_policy as ttt
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--board", default="sima@192.168.91.225")
-    ap.add_argument("--remote", default="/media/nvme/laya")
+    ap.add_argument("--remote", default="/media/nvme/neat-decision-studio")
     ap.add_argument("--model-dir", default="model")
     args = ap.parse_args()
 

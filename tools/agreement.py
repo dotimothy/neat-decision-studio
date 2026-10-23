@@ -4,7 +4,7 @@
 Two steps, because they need different environments:
 
     .venv-ref/bin/python tools/agreement.py reference --out build/agreement.json
-    python3 tools/agreement.py board --cases build/agreement.json [--remote /media/nvme/laya]
+    python3 tools/agreement.py board --cases build/agreement.json [--remote /media/nvme/neat-decision-studio]
 
 `reference` answers a fixed grid of states x questions with the fp32 PyTorch model. `board`
 sends the same requests through `laya serve` over ssh and reports how often the decision is
@@ -131,7 +131,7 @@ def main():
     board = sub.add_parser("board")
     board.add_argument("--cases", default="build/agreement.json")
     board.add_argument("--board", default="sima@192.168.91.225")
-    board.add_argument("--remote", default="/media/nvme/laya")
+    board.add_argument("--remote", default="/media/nvme/neat-decision-studio")
     board.add_argument("--model-dir", default="model", help="model directory under --remote")
     board.add_argument("--seq-lens")
     args = ap.parse_args()

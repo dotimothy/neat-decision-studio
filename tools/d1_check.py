@@ -82,7 +82,7 @@ def main():
     ap.add_argument("--reference", type=Path, default=Path("build/d1_omni_reference"))
     ap.add_argument("--images", type=Path, default=Path("build/d1_omni_reference/images"), help="the reference pictures")
     ap.add_argument("--board", default="sima@192.168.91.225")
-    ap.add_argument("--remote", default="/media/nvme/laya")
+    ap.add_argument("--remote", default="/media/nvme/neat-decision-studio")
     ap.add_argument("--model-dir", default="model-d1", help="model directory under --remote")
     ap.add_argument("--app", default="http://127.0.0.1:8095", help="the app on the board, asked how much MLA memory is held")
     ap.add_argument("--seq-lens", default="", help="load only these chains on the board, e.g. 128 (default: all)")

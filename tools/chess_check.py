@@ -18,7 +18,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--reference", default="build/chess_reference.json")
     ap.add_argument("--board", default="sima@192.168.91.225")
-    ap.add_argument("--remote", default="/media/nvme/laya")
+    ap.add_argument("--remote", default="/media/nvme/neat-decision-studio")
     ap.add_argument("--model-dir", default="model-chess")
     args = ap.parse_args()
 

@@ -56,7 +56,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--reference", type=Path, default=Path("build/clm_reference"))
     ap.add_argument("--board", default="sima@192.168.91.225")
-    ap.add_argument("--remote", default="/media/nvme/laya")
+    ap.add_argument("--remote", default="/media/nvme/neat-decision-studio")
     ap.add_argument("--model-dir", default="model-clm", help="model directory under --remote")
     ap.add_argument("--graphs", type=int, help="the directory holds only this many of the graphs")
     ap.add_argument("--layers-per-graph", type=int, default=2)

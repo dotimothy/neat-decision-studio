@@ -11,7 +11,7 @@ const { Chess } = require(path.join(__dirname, "..", "webapp/static/vendor/chess
 const core = require(path.join(__dirname, "..", "webapp/static/chess-core.js"));
 
 const games = Number(process.argv[2] || 2), plies = Number(process.argv[3] || 160), rule = process.argv[4] !== "norule";
-const board = process.env.LAYA_BOARD || "sima@192.168.91.225", remote = process.env.LAYA_REMOTE_DIR || "/media/nvme/laya";
+const board = process.env.LAYA_BOARD || "sima@192.168.91.225", remote = process.env.LAYA_REMOTE_DIR || "/media/nvme/neat-decision-studio";
 const child = spawn("ssh", ["-o", "BatchMode=yes", board, `${remote}/laya serve ${remote}/model-chess`], { stdio: ["pipe", "pipe", "ignore"] });
 const waiting = [];
 readline.createInterface({ input: child.stdout }).on("line", (line) => {

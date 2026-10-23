@@ -5,7 +5,7 @@ A position is described by what each of the three moves leads to, so there are 6
 combinations. For each the model should pick a move with the best description on offer. A
 miss matters most when it picks a fatal move while a safe one exists.
 
-    python3 tools/snake_check.py [--remote /media/nvme/laya] [--model-dir model]
+    python3 tools/snake_check.py [--remote /media/nvme/neat-decision-studio] [--model-dir model]
 """
 import argparse
 import json
@@ -20,7 +20,7 @@ from games import snake_policy as snake
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--board", default="sima@192.168.91.225")
-    ap.add_argument("--remote", default="/media/nvme/laya")
+    ap.add_argument("--remote", default="/media/nvme/neat-decision-studio")
     ap.add_argument("--model-dir", default="model")
     args = ap.parse_args()
 

@@ -6,7 +6,7 @@ to five offered cells is tried; for "which digit", 300 cells of the three kinds 
 produces. Each time the model should pick an option with the best description on offer. A
 miss matters most when a certain cell or digit was offered and it took something else.
 
-    python3 tools/sudoku_check.py [--remote /media/nvme/laya] [--model-dir model]
+    python3 tools/sudoku_check.py [--remote /media/nvme/neat-decision-studio] [--model-dir model]
 """
 import argparse
 import json
@@ -21,7 +21,7 @@ from games import sudoku_policy as sudoku
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--board", default="sima@192.168.91.225")
-    ap.add_argument("--remote", default="/media/nvme/laya")
+    ap.add_argument("--remote", default="/media/nvme/neat-decision-studio")
     ap.add_argument("--model-dir", default="model")
     args = ap.parse_args()
 

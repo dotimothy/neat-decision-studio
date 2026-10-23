@@ -4,7 +4,7 @@
 The game can only produce the states in `games/dino_policy.py`, so this is an exhaustive test
 of the deployed model: every state, the action it picks, and how sure it is.
 
-    python3 tools/dino_check.py [--remote /media/nvme/laya] [--model-dir model-dino]
+    python3 tools/dino_check.py [--remote /media/nvme/neat-decision-studio] [--model-dir model-dino]
 """
 import argparse
 import json
@@ -19,7 +19,7 @@ from games import dino_policy
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--board", default="sima@192.168.91.225")
-    ap.add_argument("--remote", default="/media/nvme/laya")
+    ap.add_argument("--remote", default="/media/nvme/neat-decision-studio")
     ap.add_argument("--model-dir", default="model-dino")
     args = ap.parse_args()
 

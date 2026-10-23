@@ -7,7 +7,7 @@ prints the hit-or-stand chart the model plays from a fresh deck against basic st
 hands the three-fact description cannot tell apart (hard 12 against a 2 or 3, soft 18 against
 a 9, 10 or ace) are expected differences.
 
-    python3 tools/blackjack_check.py [--remote /media/nvme/laya] [--model-dir model]
+    python3 tools/blackjack_check.py [--remote /media/nvme/neat-decision-studio] [--model-dir model]
 """
 import argparse
 import json
@@ -22,7 +22,7 @@ from games import blackjack_policy as bj
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--board", default="sima@192.168.91.225")
-    ap.add_argument("--remote", default="/media/nvme/laya")
+    ap.add_argument("--remote", default="/media/nvme/neat-decision-studio")
     ap.add_argument("--model-dir", default="model")
     args = ap.parse_args()
 

@@ -6,7 +6,7 @@ reports how the model reads a history: how often it names one of the most used t
 often the latest one, and what playing the throw that beats its answer would have won against
 the throw that player makes next.
 
-    python3 tools/rps_check.py [--remote /media/nvme/laya] [--model-dir model]
+    python3 tools/rps_check.py [--remote /media/nvme/neat-decision-studio] [--model-dir model]
 """
 import argparse
 import json
@@ -22,7 +22,7 @@ from games import rps_policy as rps
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--board", default="sima@192.168.91.225")
-    ap.add_argument("--remote", default="/media/nvme/laya")
+    ap.add_argument("--remote", default="/media/nvme/neat-decision-studio")
     ap.add_argument("--model-dir", default="model")
     args = ap.parse_args()
 
