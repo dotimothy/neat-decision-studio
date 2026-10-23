@@ -2,11 +2,13 @@
 //
 // It is laid out like the settings of SiMa.ai's NEAT GenAI Studio: a window over the page with
 // its sections down the left. Models is what is on this board (load, unload, delete, the MLA's
-// memory, Reset Accelerator); Add Model is what Hugging Face has (download); About says which
-// version is running. Several models can be on the MLA at once, as many as fit in its memory.
+// memory, Reset Accelerator); Add Model is what Hugging Face has (download); Camera is which of
+// this computer's cameras the Vision page uses; About says which version is running. Several
+// models can be on the MLA at once, as many as fit in its memory.
 //
 //   openSettings()            open it on Models
-//   openSettings("add")       on another section: "models", "add" or "about"
+//   openSettings("camera")    on another section: "models", "add", "camera" or "about"
+//   cameraConstraints()       what to ask getUserMedia for, to open the chosen camera
 //
 // /models, or #settings on any page, opens it as the page loads. While it is open the board
 // pushes what changes (GET /api/events), so a model is seen arriving graph by graph.
@@ -126,6 +128,14 @@
     .settings .about dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 0; }
     .settings .about dt { color: var(--muted); } .settings .about dd { margin: 0; }
     .settings .about img { width: 54px; height: 54px; border-radius: 14px; }
+    .settings select { font: inherit; color: var(--ink); background: var(--field) var(--caret) no-repeat right 12px center / 12px 12px; border: 1px solid var(--line);
+                       border-radius: 10px; padding: 7px 34px 7px 12px; min-width: 0; max-width: 100%; flex: 1 1 260px; }
+    .settings .preview { position: relative; margin-top: 12px; aspect-ratio: 16 / 9; max-width: 560px; border-radius: 12px; overflow: hidden;
+                         background: var(--chip); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; }
+    .settings .preview video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .settings .preview span { color: var(--muted); font-size: 13.5px; padding: 0 18px; text-align: center; }
+    .settings .preview small { position: absolute; left: 8px; bottom: 8px; padding: 2px 9px; border-radius: 999px; font-size: 12px;
+                               color: #fff; background: rgb(0 0 0 / .55); }
   ` }));
 
   let info = null, hub = null;      // the board's models, and the list on Hugging Face
@@ -142,10 +152,11 @@
   const panels = {
     models: el("section", { className: "settings-panel", role: "tabpanel" }),
     add: el("section", { className: "settings-panel", role: "tabpanel" }),
+    camera: el("section", { className: "settings-panel", role: "tabpanel" }),
     about: el("section", { className: "settings-panel about", role: "tabpanel" }),
   };
   const tabs = el("nav", { className: "settings-tabs", role: "tablist", ariaLabel: "Settings sections" });
-  for (const [key, name] of [["models", "Models"], ["add", "Add Model"], ["about", "About"]]) {
+  for (const [key, name] of [["models", "Models"], ["add", "Add Model"], ["camera", "Camera"], ["about", "About"]]) {
     tabs.append(el("button", { type: "button", role: "tab", textContent: name, onclick: () => show(key) }));
     tabs.lastChild.dataset.tab = key;
   }
@@ -160,6 +171,7 @@
   function show(tab) {
     for (const button of tabs.children) button.classList.toggle("here", button.dataset.tab === tab);
     for (const [key, panel] of Object.entries(panels)) panel.classList.toggle("here", key === tab);
+    tab === "camera" ? drawCamera() : stopPreview();
   }
 
   function open(tab = "models", model = null) {
@@ -175,6 +187,7 @@
   function shut() {
     root.classList.remove("open");
     confirming = false;
+    stopPreview();
     events?.close(); events = null;
     clearTimeout(timer);
     if (location.pathname === "/models") history.replaceState(null, "", "/");
@@ -458,6 +471,96 @@
     }
     return block;
   }
+
+  // -------------------------------------------------------------------------------- camera
+  // Which camera the Vision page decides from. It is a camera on the computer this browser runs
+  // on, not on the board, so the choice is kept in this browser (localStorage): its device id,
+  // and its name, to find it again if the browser gives it another id.
+  const CAMERA = "laya.camera";
+  const cameraChoice = () => { try { return JSON.parse(localStorage.getItem(CAMERA)) || null; } catch (_) { return null; } };
+  function chooseCamera(device) {
+    try { device ? localStorage.setItem(CAMERA, JSON.stringify({ id: device.deviceId, label: device.label })) : localStorage.removeItem(CAMERA); } catch (_) { /* this page only */ }
+    dispatchEvent(new Event("camerachange"));
+  }
+  const cameras = async () => {
+    try { return (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === "videoinput"); } catch (_) { return []; }
+  };
+  // What getUserMedia is asked for: the chosen camera if it can be found (by id, else by name),
+  // asked for by id but not insisted on otherwise, and the browser's own choice with none chosen.
+  async function cameraConstraints() {
+    const base = { width: { ideal: 1280 } }, choice = cameraChoice();
+    if (!choice) return { video: { ...base, facingMode: "environment" } };
+    const all = await cameras();
+    const found = all.find((device) => device.deviceId && device.deviceId === choice.id) || all.find((device) => device.label && device.label === choice.label);
+    return { video: { ...base, deviceId: found ? { exact: found.deviceId } : choice.id }, chosen: choice };
+  }
+  window.cameraConstraints = cameraConstraints;
+  window.cameraChoice = cameraChoice;
+
+  let preview = null, previewing = 0;           // the preview's stream, and which drawing it belongs to
+  function stopPreview() {
+    previewing++;
+    if (preview) { for (const track of preview.getTracks()) track.stop(); preview = null; }
+  }
+  async function drawCamera() {
+    const panel = panels.camera;
+    stopPreview();
+    const turn = previewing;
+    const intro = el("div", { className: "block" }, el("div", { className: "label", textContent: "Camera for Vision" }),
+      el("p", { className: "note", textContent: "Live mode on the Vision page decides frame after frame from this camera. It is a camera on the computer "
+        + "this browser runs on, so the choice is kept in this browser; another browser chooses its own." }));
+    if (!navigator.mediaDevices?.getUserMedia) {
+      panel.replaceChildren(intro, el("div", { className: "empty", textContent: "A browser gives a page its camera only over HTTPS or on the machine itself. "
+        + `Open this page as https://${location.host}${location.pathname}, or in the board's own browser, to choose a camera.` }));
+      return;
+    }
+    let all = await cameras();
+    const named = all.some((device) => device.label);
+    const choice = cameraChoice();
+    const select = el("select", { ariaLabel: "Camera" }, el("option", { value: "", textContent: "Default Camera" }));
+    all.forEach((device, at) => select.append(el("option", { value: device.deviceId, textContent: device.label || `Camera ${at + 1}` })));
+    const current = choice && (all.find((device) => device.deviceId === choice.id) || all.find((device) => device.label && device.label === choice.label));
+    if (choice && !current) select.append(el("option", { value: choice.id, textContent: `${choice.label || "The chosen camera"} (Not Connected)` }));
+    select.value = choice ? (current?.deviceId || choice.id) : "";
+    select.disabled = !named && all.length > 0;
+    select.onchange = () => {
+      const device = all.find((one) => one.deviceId === select.value);
+      if (select.value === "") chooseCamera(null);
+      else if (device) chooseCamera(device);
+      drawCamera();
+    };
+    const view = el("div", { className: "preview" });
+    const allow = button("Allow Camera Access", () => start(true), { className: "primary" });
+    panel.replaceChildren(intro,
+      el("div", {},
+        el("div", { className: "row" }, select, named || !all.length ? "" : allow),
+        el("p", { className: "note", textContent: !all.length ? "This browser sees no camera. Plug one in; the list follows."
+          : choice && !current && named ? `The chosen camera is not connected, so Vision uses the default until it is back. ${all.length} ${all.length === 1 ? "camera" : "cameras"} on this computer.`
+          : named ? `${all.length} ${all.length === 1 ? "camera" : "cameras"} on this computer.`
+          : "The browser names its cameras only once this page may use one: allow it, and choose." }),
+        view));
+    // The preview: what the chosen camera sees, while this section is open. It opens by itself
+    // once the browser has said this page may use a camera, and on Allow Camera Access before.
+    async function start(asked) {
+      if (!named && !asked) { view.replaceChildren(el("span", { textContent: "The preview shows here once the page may use a camera." })); return; }
+      view.replaceChildren(el("span", { textContent: "Opening the camera…" }));
+      let stream;
+      try { stream = await navigator.mediaDevices.getUserMedia({ video: (await cameraConstraints()).video }); }
+      catch (error) {
+        if (turn === previewing) view.replaceChildren(el("span", { textContent: "The camera could not be opened: " + error.message }));
+        return;
+      }
+      if (turn !== previewing) { for (const track of stream.getTracks()) track.stop(); return; }
+      if (!named) { for (const track of stream.getTracks()) track.stop(); drawCamera(); return; }   // the names can be read now
+      preview = stream;
+      const track = stream.getVideoTracks()[0], got = track.getSettings();
+      const video = el("video", { muted: true, playsInline: true, autoplay: true });
+      video.srcObject = stream;
+      view.replaceChildren(video, el("small", { textContent: [track.label, got.width && `${got.width} × ${got.height}`].filter(Boolean).join(" · ") }));
+    }
+    start(false);
+  }
+  navigator.mediaDevices?.addEventListener?.("devicechange", () => { if (panels.camera.classList.contains("here") && root.classList.contains("open")) drawCamera(); });
 
   // ------------------------------------------------------------------------------- drawing
   function render() {

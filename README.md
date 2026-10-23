@@ -570,8 +570,11 @@ Behind it are five areas:
   or a video file frame after frame, as fast as the board answers, with the answer over the
   video and a line of the last frames' answers under it (about four frames a second with d1
   Omni and three questions, two with d1 3B); **Keep Frame** puts what is on
-  screen into the test set. (A browser gives a page its camera only over HTTPS or on the machine
-  itself, which is why the app serves HTTPS: see [Run on the board](#run-on-the-board).) On the
+  screen into the test set. **Choose Camera**, or Camera in Settings, picks which of the
+  computer's cameras that is, with a preview; the choice is kept in the browser, since the
+  camera is the browser's computer's, not the board's. (A browser gives a page its camera only
+  over HTTPS or on the machine itself, which is why the app serves HTTPS: see
+  [Run on the board](#run-on-the-board).) On the
   example sets, 48 labelled answers, d1 3B agrees with the person on 45 and d1 Omni on 37, at
   about 0.5 s and 0.2 s a picture for three questions.
 - **Games** (`/games`): Snake, which the tab opens on, Pac-Man, Chess, Tic-Tac-Toe, Rock Paper
@@ -594,7 +597,8 @@ Behind it are five areas:
   removes its files from the board's disk after asking; a loaded model has to be unloaded
   first), and a Model Card to unfold: encoder, languages, precision, agreement with PyTorch,
   size, source. **Add Model** has what is only on Hugging Face, with Download, and Cancel
-  while it runs. **About** says which version is running. Loading shows a progress
+  while it runs. **Camera** chooses the camera the Vision page's Live mode uses, from those
+  the browser sees, with a preview. **About** says which version is running. Loading shows a progress
   bar whose stages are real (the runtime logs when it starts and finishes each graph); inside
   a stage it is the time spent against a measured estimate. A download's bar counts bytes.
   The memory bar has a segment a loaded model, each in its own colour, and moves as a

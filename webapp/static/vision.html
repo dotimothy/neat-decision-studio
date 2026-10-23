@@ -119,6 +119,7 @@
       <div class="kinds" id="modes"><button type="button" data-mode="set" class="here">Test Set</button><button type="button" data-mode="live">Live</button></div>
       <div class="row" id="liveButtons" hidden>
         <button type="button" id="camera">Use Camera</button>
+        <button type="button" id="chooseCamera" title="Settings: which of this computer's cameras to use">Choose Camera</button>
         <button type="button" id="openVideo">Open Video File</button>
         <button type="button" id="keep" disabled title="Add what is on screen to the test set">Keep Frame</button>
         <button type="button" id="stop" disabled>Stop</button>
@@ -510,11 +511,29 @@ function stopLive() {
   $("stop").disabled = $("keep").disabled = true; last = null;
 }
 async function begin() { history = []; frames = 0; since = performance.now(); $("stop").disabled = $("keep").disabled = false; draw(); try { await $("video").play(); } catch (_) { /* shown paused */ } if (!running) loop(); }
-$("camera").onclick = async () => {
+// The camera is the one chosen in Settings (Camera), or the browser's own choice with none.
+let cameraName = "";
+async function openCamera() {
   stopLive();
-  try { stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, facingMode: "environment" } }); } catch (error) { return fail("The camera could not be opened: " + error.message); }
+  const wanted = window.cameraConstraints ? await window.cameraConstraints() : { video: { width: { ideal: 1280 }, facingMode: "environment" } };
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: wanted.video }); }
+  catch (error) {
+    if (!wanted.chosen) return fail("The camera could not be opened: " + error.message);
+    // The chosen one is not there (unplugged, or in use by another program): the default instead.
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 } } }); } catch (again) { return fail("The camera could not be opened: " + again.message); }
+  }
+  const track = stream.getVideoTracks()[0], chosen = wanted.chosen;
+  cameraName = track?.label || "";
+  fail(chosen && track && track.getSettings().deviceId !== chosen.id && track.label !== chosen.label
+    ? `The camera chosen in Settings, ${chosen.label || "by its id"}, could not be opened, so this is ${track.label || "the default camera"}.` : "");
   $("video").srcObject = stream; begin();
-};
+}
+$("camera").onclick = openCamera;
+$("chooseCamera").onclick = () => window.openSettings?.("camera");
+// A camera chosen in Settings while one is showing takes its place, here or from another tab.
+const cameraChanged = () => { if (stream) openCamera(); };
+addEventListener("camerachange", cameraChanged);
+addEventListener("storage", (event) => { if (event.key === "laya.camera") cameraChanged(); });
 function playFile(file) { setMode("live"); stopLive(); $("video").src = URL.createObjectURL(file); begin(); }
 $("openVideo").onclick = () => $("videoFile").click();
 $("videoFile").onchange = () => { if ($("videoFile").files[0]) playFile($("videoFile").files[0]); $("videoFile").value = ""; };
@@ -556,7 +575,8 @@ function drawLive() {
   }) : []));
   const size = last && readAs(last.width, last.height), elapsed = (performance.now() - since) / 1000;
   const cost = last ? models.map((name) => last.results[name]?.usage ? `${title(name)} ${last.results[name].usage.latency_ms.toFixed(0)} ms` : "").filter(Boolean).join(" · ") : "";
-  $("read").textContent = last ? `${(frames / Math.max(elapsed, 0.001)).toFixed(1)} frames a second decided · ${cost} · read at ${size.width} × ${size.height} as ${size.positions} positions` : " ";
+  $("read").textContent = last ? `${(frames / Math.max(elapsed, 0.001)).toFixed(1)} frames a second decided · ${cost} · read at ${size.width} × ${size.height} as ${size.positions} positions`
+    + (stream && cameraName ? ` · ${cameraName}` : "") : " ";
   $("liveHint").textContent = q ? `The line is the question in focus over the last frames: ${q.type === "noul" ? "how sure of yes" : q.type === "score" ? "the level" : "which option"}. Click another question to follow it.` : "Add a question to decide about each frame.";
   drawDetail(last?.results, "This Frame, Every Question");
   // The line: the question in focus, a model a colour, the newest frame at the right.
