@@ -343,12 +343,108 @@ def mla_memory_total() -> int:
     return sum(size for _, size in mla_memory_regions())
 
 
+APPCOMPLEX = "simaai-appcomplex.service"         # the MLA services before Platform 3.0
+MLA_DEVICE = "/dev/mla"
+DMS_EXPORTER = "simaai,dms"                      # Platform 3.0: the MLA's memory, as dma-bufs
+
+
+def dispatcher_pid() -> str | None:
+    """The MLA dispatcher (`mlashmcomplex`), which Platform 3.0 no longer has."""
+    for entry in os.listdir("/proc"):
+        if entry.isdigit():
+            try:
+                if Path(f"/proc/{entry}/comm").read_text().strip() == "mlashmcomplex":
+                    return entry
+            except OSError:
+                pass
+    return None
+
+
+_appcomplex: bool | None = None
+
+
+def appcomplex_installed() -> bool:
+    """Is the board's MLA service there to restart (firmware before Platform 3.0)? Asked once:
+    the firmware does not change under a running app."""
+    global _appcomplex
+    if _appcomplex is None:
+        _appcomplex = _ask_systemd()
+    return _appcomplex
+
+
+def reset_stops_programs() -> bool:
+    """Does Reset Accelerator stop the programs on the MLA (Platform 3.0), rather than
+    restart the board's MLA services?"""
+    return not (os.environ.get("LAYA_RESET_COMMAND") or os.access("/usr/bin/fix_devkit_runtime.sh", os.X_OK)
+                or appcomplex_installed())
+
+
+def _ask_systemd() -> bool:
+    try:
+        done = subprocess.run(["systemctl", "list-unit-files", APPCOMPLEX, "--no-legend"],
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return APPCOMPLEX in done.stdout
+
+
+def dms_buffers(pid: str) -> dict[str, int] | None:
+    """The MLA memory one process holds on Platform 3.0: its `simaai,dms` dma-bufs, {inode:
+    bytes}, each buffer once however many descriptors share it. None if the process cannot be
+    looked into (gone, or another user's)."""
+    try:
+        fds = os.listdir(f"/proc/{pid}/fd")
+    except OSError:
+        return None
+    held: dict[str, int] = {}
+    for fd in fds:
+        try:
+            if not os.readlink(f"/proc/{pid}/fd/{fd}").startswith("/dmabuf"):
+                continue
+            info = Path(f"/proc/{pid}/fdinfo/{fd}").read_text()
+        except OSError:
+            continue
+        fields = dict(line.split(":", 1) for line in info.splitlines() if ":" in line)
+        if fields.get("exp_name", "").strip() != DMS_EXPORTER:
+            continue
+        try:
+            held[fields.get("ino", "").strip() or f"{pid}/{fd}"] = int(fields.get("size", "0"))
+        except ValueError:
+            pass
+    return held
+
+
+def mla_users() -> dict[str, int]:
+    """Platform 3.0: every process holding MLA memory or the MLA device, {pid: bytes held}."""
+    users: dict[str, int] = {}
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit() or int(entry) == os.getpid():
+            continue
+        held = dms_buffers(entry)
+        if held is None:
+            continue
+        device = False
+        if not held:
+            try:
+                device = any(os.readlink(f"/proc/{entry}/fd/{fd}") == MLA_DEVICE for fd in os.listdir(f"/proc/{entry}/fd"))
+            except OSError:
+                pass
+        if held or device:
+            users[entry] = sum(held.values())
+    return users
+
+
 class MlaHeld:
     """How much of the MLA's memory is taken, by every program on the board.
 
-    The MLA's memory is handed out by one process, the dispatcher (`mlashmcomplex`), and what
-    it has taken shows in its memory map as mappings of /dev/simaai-mem inside the reserved
-    region. This is the number that decides whether another graph fits. The dispatcher does
+    On Platform 3.0 every program takes its MLA memory itself, as `simaai,dms` dma-bufs, and
+    hands it back when it exits: the figure is the sum of every such buffer on the board, each
+    once, readable without root (other users' programs are not counted unless this app is
+    root).
+
+    Before 3.0 the MLA's memory is handed out by one process, the dispatcher (`mlashmcomplex`),
+    and what it has taken shows in its memory map as mappings of /dev/simaai-mem inside the
+    reserved region. This is the number that decides whether another graph fits. The dispatcher does
     not always give memory back when a model is unloaded, and never after a load that failed,
     so it can be high with little loaded; only resetting the accelerator brings it down.
 
@@ -370,15 +466,7 @@ class MlaHeld:
                 return Path(fixed).read_text()
             except OSError:
                 return None
-        pid = None
-        for entry in os.listdir("/proc"):
-            if entry.isdigit():
-                try:
-                    if Path(f"/proc/{entry}/comm").read_text().strip() == "mlashmcomplex":
-                        pid = entry
-                        break
-                except OSError:
-                    pass
+        pid = dispatcher_pid()
         if pid is None:
             return None
         try:
@@ -423,6 +511,12 @@ class MlaHeld:
             maps = self._maps() if self._regions else None
             if maps is not None:
                 self._value = sum(size for _, size in self._pieces(maps))
+            elif self._regions and not os.environ.get("LAYA_MLA_MAPS") and dispatcher_pid() is None:
+                held: dict[str, int] = {}         # Platform 3.0: each buffer once, board-wide
+                for pid in os.listdir("/proc"):
+                    if pid.isdigit():
+                        held.update(dms_buffers(pid) or {})
+                self._value = sum(held.values())
             return self._value
 
     def clients(self, own: set[int]) -> list[dict]:
@@ -436,6 +530,20 @@ class MlaHeld:
         if not self._regions or os.environ.get("LAYA_MLA_MAPS"):
             return []
         found: dict[str, dict] = {}
+        if dispatcher_pid() is None:
+            # Platform 3.0: a program holds its models itself, so what each holds is measured.
+            for entry, held in mla_users().items():
+                if int(entry) in own:
+                    continue
+                try:
+                    command = Path(f"/proc/{entry}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+                except OSError:
+                    continue
+                name = program_name(command)
+                program = found.setdefault(name, {"name": name, "pids": [], "command": command[:160], "held_bytes": 0})
+                program["pids"].append(int(entry))
+                program["held_bytes"] += held
+            return list(found.values())
         for entry in os.listdir("/proc"):
             if not entry.isdigit() or int(entry) in own or int(entry) == os.getpid():
                 continue
@@ -479,21 +587,26 @@ def studio_memory(url: str) -> dict | None:
         return None
 
 
-def reset_accelerator() -> str:
-    """Restart the board's MLA services, which unloads every model on the MLA: this app's and
-    every other application's. It is what clears a failed load that left memory held.
+def reset_accelerator(grace: float = 60.0) -> str:
+    """Take every model off the MLA: this app's and every other application's. It is what
+    clears a failed load that left memory held.
 
-    The command is the one `./run.sh --reset-mla` runs, and it needs root: without a password
-    if sudo allows that, otherwise with MLA_SUDO_PASSWORD (run.sh passes the DevKit image's).
-    Returns the end of the command's output; raises Refused if it could not be run.
+    Before Platform 3.0 that restarts the board's MLA services, the command `./run.sh
+    --reset-mla` runs, which needs root: without a password if sudo allows that, otherwise with
+    MLA_SUDO_PASSWORD (run.sh passes the DevKit image's). Platform 3.0 has no such service:
+    every program holds its own models and they come off when it exits, so the programs
+    holding the MLA are stopped (SIGTERM, then SIGKILL after `grace` seconds; a clean exit is
+    what returns the memory). Returns what was done; raises Refused if it could not be done.
     """
     command = os.environ.get("LAYA_RESET_COMMAND")              # for trying this off the board
     if command:
         argv = ["sh", "-c", command]
     elif os.access("/usr/bin/fix_devkit_runtime.sh", os.X_OK):
         argv = ["sudo", "-n", "/usr/bin/fix_devkit_runtime.sh"]
+    elif appcomplex_installed():
+        argv = ["sudo", "-n", "systemctl", "restart", APPCOMPLEX]
     else:
-        argv = ["sudo", "-n", "systemctl", "restart", "simaai-appcomplex.service"]
+        return stop_mla_programs(grace)
     try:
         done = subprocess.run(argv, capture_output=True, text=True, timeout=180)
         password = os.environ.get("MLA_SUDO_PASSWORD")
@@ -506,6 +619,48 @@ def reset_accelerator() -> str:
         raise Refused(f"the reset failed ({done.returncode}): {tail or 'no output'}")
     time.sleep(3)                           # the services need a moment before a model can be loaded again
     return tail
+
+
+def running(pid: int) -> bool:
+    """Is the process still there (and not a zombie waiting for its parent)?"""
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return False
+
+
+def stop_mla_programs(grace: float = 60.0) -> str:
+    """Platform 3.0's reset: stop every other program holding the MLA, and say which."""
+    pids = [int(pid) for pid in mla_users()]
+    names, refused = {}, []
+    for pid in pids:
+        try:
+            command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+            os.kill(pid, signal.SIGTERM)
+            names[pid] = program_name(command)
+        except ProcessLookupError:
+            pass
+        except (PermissionError, OSError):
+            refused.append(pid)
+    end = time.monotonic() + grace
+    waiting = set(names)
+    while waiting and time.monotonic() < end:
+        waiting = {pid for pid in waiting if running(pid)}
+        if waiting:
+            time.sleep(0.25)
+    for pid in waiting:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    if refused:
+        raise Refused(f"not allowed to stop {', '.join(map(str, refused))} (another user's program): "
+                      "stop it with sudo kill on the board")
+    if not names:
+        return "nothing else was on the MLA"
+    stopped = sorted(set(names.values()))
+    return f"stopped {len(names)} program{'s' if len(names) != 1 else ''} on the MLA: {', '.join(stopped)}" + \
+           (f" ({len(waiting)} killed after {grace:.0f} s)" if waiting else "")
 
 
 class ModelManager:
@@ -533,8 +688,8 @@ class ModelManager:
     def mla(self) -> dict:
         """The MLA's memory in full, for Settings: what is held, by this app, and by whom else.
 
-        `held_bytes` is measured (the dispatcher's map) and is what decides whether a model
-        fits. The shares are not measured: this app's is the size of its graph files, and
+        `held_bytes` is measured (every program's `simaai,dms` buffers on Platform 3.0, the
+        dispatcher's map before) and is what decides whether a model fits. The shares are not measured: this app's is the size of its graph files, and
         another program's is what that program reports, where it has a way to be asked. So
         `other_bytes`, what is held beyond this app's graphs, is the figure to go by for
         everybody else together; the programs listed say who they are.
@@ -557,7 +712,8 @@ class ModelManager:
                     program["reported"] = studio_memory(self.studio_control)
             self._report_at = time.monotonic()
             self._report = {"total_bytes": self._mla_total, "held_bytes": held, "app_bytes": mine, "app_measured": measured,
-                            "other_bytes": None if held is None else max(held - mine, 0), "programs": programs}
+                            "other_bytes": None if held is None else max(held - mine, 0), "programs": programs,
+                            "reset_stops_programs": reset_stops_programs()}
             return self._report
 
     def loaded(self) -> list[str]:

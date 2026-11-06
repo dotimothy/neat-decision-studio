@@ -418,7 +418,9 @@
       const said = program.reported;
       const models = said ? Object.entries(said.models).map(([name, bytes]) => `${name} ${mb(bytes)}`).join(", ") : "";
       rows.push(el("div", { className: "other" }, el("b", { textContent: program.name }),
-        el("span", { textContent: said ? (said.bytes ? `reports ${mb(said.bytes)}: ${models}` : "reports no model loaded") : "connected; it does not say what it has loaded" })));
+        el("span", { textContent: program.held_bytes !== undefined
+          ? `holds ${mb(program.held_bytes)}` + (said && said.bytes ? ` (reports ${models})` : "")
+          : said ? (said.bytes ? `reports ${mb(said.bytes)}: ${models}` : "reports no model loaded") : "connected; it does not say what it has loaded" })));
     }
     if (!rows.length) rows.push(el("div", { className: "other" }, el("span", { textContent: "No other program is connected to the accelerator." })));
     const beyond = mla.other_bytes;
@@ -426,8 +428,10 @@
       el("div", { className: "row" }, el("span", { className: "label grow", textContent: "Other Programs" }),
          el("span", { className: "note", style: "margin:0", textContent: `${mb(beyond)} held beyond this app's models` + (mla.app_measured ? "" : " (estimated)") })),
       ...rows,
-      el("p", { className: "note", textContent: "The accelerator says how much is held in all, not by whom. A program's own figure is its estimate, "
-        + "and it can name models that a reset has since taken off; memory held with no program left to claim it has not been given back." }));
+      el("p", { className: "note", textContent: mla.reset_stops_programs
+        ? "What each program holds is measured: on Platform 3.0 every program takes its MLA memory itself and returns it when it exits."
+        : "The accelerator says how much is held in all, not by whom. A program's own figure is its estimate, "
+          + "and it can name models that a reset has since taken off; memory held with no program left to claim it has not been given back." }));
   }
 
   // Resetting the accelerator. The board itself may do it freely; a browser anywhere else is
@@ -454,7 +458,7 @@
 
   function resetBlock() {
     const go = button("Reset Accelerator", () => { confirming = true; resetSaid = ""; render(); },
-                      { disabled: Boolean(info.resetting) || confirming, title: "Restart the MLA services and take every model off the accelerator" });
+                      { disabled: Boolean(info.resetting) || confirming, title: "Take every model off the accelerator, this app's and every other program's" });
     if (info.resetting) go.textContent = "Resetting…";
     const block = el("div", { className: "block" },
       el("div", { className: "row" }, go, el("span", { className: "note", style: "margin:0",
@@ -463,8 +467,11 @@
       const token = el("input", { autocomplete: "off", spellcheck: false, ariaLabel: "Reset token", value: storedToken() });
       const yes = button("Reset Accelerator", () => { yes.disabled = true; yes.textContent = "Resetting…"; reset(token.value.trim()); }, { className: "danger" });
       block.append(el("div", { className: "confirm" },
-        el("p", {}, el("b", { textContent: "Reset the Accelerator? " }), "This restarts the board's MLA services. Every model comes off the accelerator: ",
-           "this app's, and any other application's, such as Neat GenAI Studio, which then has to load its models again. Nothing on disk is touched."),
+        el("p", {}, el("b", { textContent: "Reset the Accelerator? " }), "Every model comes off the accelerator: this app's, and every other application's. ",
+           mla && mla.reset_stops_programs
+             ? `On this board (Platform 3.0) each program holds its own models, so the others are stopped: ${mla.programs.map((program) => program.name).join(", ") || "none is on the MLA now"}. Each gets a minute to exit cleanly. `
+             : "This restarts the board's MLA services; other applications, such as Neat GenAI Studio, have to load their models again. ",
+           "Nothing on disk is touched."),
         needsToken ? el("p", {}, "This browser is not on the board, so the reset token is needed. On the board, ", el("code", { textContent: "./run.sh --reset-token" }), " prints it.", token) : "",
         resetSaid ? el("p", { className: "said", style: "margin:0 0 8px", textContent: resetSaid }) : "",
         el("div", { className: "row" }, yes, button("Cancel", () => { confirming = false; render(); }))));

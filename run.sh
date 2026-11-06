@@ -48,8 +48,9 @@
 # DECISION_STUDIO_BRANCH names another branch than main. A running app is left running: restart
 # it to use what was installed.
 #
-# --reset-mla restarts the board-wide MLA services, which unloads every model on the MLA,
-# including other applications'. It never happens unless asked for. Use it when the model
+# --reset-mla takes every model off the MLA, including other applications'. Before Platform 3.0
+# it restarts the board-wide MLA services; on 3.0, which has none, it stops the programs that
+# have the MLA open (they hold their own models). It never happens unless asked for. Use it when the model
 # fails to load with MLA_LOAD_FAILED: the MLA memory pool is then full or fragmented.
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -316,10 +317,28 @@ if [[ $reset -eq 1 ]]; then
   echo "Resetting the MLA runtime (this unloads every model on the MLA)"
   if [[ -x /usr/bin/fix_devkit_runtime.sh ]]; then
     mla_sudo /usr/bin/fix_devkit_runtime.sh | tail -n 3
-  else
+    sleep 3
+  elif systemctl list-unit-files simaai-appcomplex.service --no-legend 2> /dev/null | grep -q simaai-appcomplex; then
     mla_sudo systemctl restart simaai-appcomplex.service
+    sleep 3
+  else
+    # Platform 3.0 has no MLA service: every program holds its own models, and they come off
+    # when it exits. Stop the programs that have the MLA open, giving each a minute to exit
+    # cleanly (that is what returns the memory) before killing it.
+    holders="$(fuser /dev/mla 2> /dev/null | tr -s ' ' || true)"
+    if [[ -z "${holders// /}" ]]; then
+      echo "  nothing is on the MLA"
+    else
+      for pid in $holders; do echo "  stopping ${pid}: $(tr '\0' ' ' < "/proc/${pid}/cmdline" 2> /dev/null | cut -c1-100)"; done
+      kill -TERM $holders 2> /dev/null || mla_sudo kill -TERM $holders || true
+      for _ in $(seq 1 240); do
+        left=""; for pid in $holders; do [[ -d "/proc/${pid}" ]] && left="${left} ${pid}"; done
+        [[ -z "$left" ]] && break
+        sleep 0.25
+      done
+      [[ -n "$left" ]] && { echo "  killing${left} (still running after 60 s)"; kill -KILL $left 2> /dev/null || mla_sudo kill -KILL $left || true; }
+    fi
   fi
-  sleep 3
 fi
 
 # Loaded graphs live in the kernel's CMA pool, and so does page cache until something needs the
@@ -406,6 +425,12 @@ if [[ $open_browser -eq 1 ]]; then
   waiter=$!
 fi
 status=0
+# A runtime built on other firmware (before Platform 3.0, say) cannot find the libraries it
+# was linked against: say so plainly instead of failing on the first model load.
+if [[ -x "${APP_DIR}/laya" ]] && missing="$(ldd "${APP_DIR}/laya" 2> /dev/null | awk '/not found/ {print $1}' | tr '\n' ' ')" \
+   && [[ -n "$missing" ]]; then
+  fail "the Laya runtime was built for other firmware and is missing ${missing}: rebuild it with ${APP_DIR}/setup.sh --runtime-only"
+fi
 python3 "${APP_DIR}/webapp/server.py" "${args[@]}" || status=$?
 [[ -n "$waiter" ]] && kill "$waiter" 2> /dev/null || true
 if [[ $status -ne 0 && $status -ne 130 ]]; then
