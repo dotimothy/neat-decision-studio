@@ -851,8 +851,9 @@ def command(session: Session, line: str) -> bool:
             client.call("/api/models/delete", {"model": rest})
             print(f"{OK}✔{RESET} {rest} is deleted from this board")
     elif name in ("reset", "reset-mla"):
-        print(f"{WARN}  This restarts the board's MLA services. Every model comes off the accelerator: this app's and any\n"
-              f"  other application's, such as Neat GenAI Studio, which then has to load its models again.{RESET}")
+        print(f"{WARN}  Every model comes off the accelerator: this app's and any other application's. On Platform 3.0\n"
+              f"  that stops the other programs using the MLA, such as Neat GenAI Studio; before 3.0 it restarts\n"
+              f"  the board's MLA services and they have to load their models again.{RESET}")
         try:
             sure = input(f"{WARN}  Reset the accelerator? [y/N] {RESET}").strip().lower()
         except (EOFError, KeyboardInterrupt):

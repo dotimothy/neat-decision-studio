@@ -122,7 +122,8 @@ for tool in cmake g++ python3; do
 done
 ok "cmake, g++ and python3 ${C_DIM}($(python3 --version 2>&1 | cut -d' ' -f2))${C_RESET}"
 if ! find /usr/lib /usr/local/lib -name SimaLMMConfig.cmake 2> /dev/null | grep -q .; then
-  fail "The LLiMa runtime development package is missing." "Install it with: sima-cli neat install llima"
+  fail "The LLiMa runtime development package is missing." "Install it with: sima-cli neat install llima" \
+       "(if apt says its dependencies are not installable, run sudo apt-get update first)"
 fi
 ok "LLiMa runtime library ${C_DIM}(sima-lmm-dev)${C_RESET}"
 [[ -f /usr/include/nlohmann/json.hpp ]] \

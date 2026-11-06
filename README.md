@@ -604,23 +604,29 @@ Behind it are five areas:
   The memory bar has a segment a loaded model, each in its own colour, and moves as a
   model arrives: the board pushes what changes as it changes (`GET /api/events`, server-sent
   events), counting each graph when the runtime reports it on the MLA and showing the one
-  still arriving striped. In grey it shows what the accelerator holds besides:
-  the MLA's memory is handed out by one process (`mlashmcomplex`), and what it has taken for
-  every program on the board can be read from its memory map (as root, or with `sudo -n`;
-  without either the grey part is left out). That figure decides whether a model fits. It
-  does not always come down when a model is unloaded, and never after a load that failed,
-  so a load that would not fit is refused before it starts, with what is free. **Reset
-  Accelerator** is what brings it down.
+  still arriving striped. In grey it shows what the accelerator holds besides. On Platform
+  3.0 every program takes its MLA memory itself, as `simaai,dms` dma-bufs, and returns it
+  when it exits: the app adds up every such buffer on the board, each once (no root needed;
+  another user's programs are counted only when the app runs as root). Before 3.0 the MLA's
+  memory is handed out by one process (`mlashmcomplex`), and what it has taken for every
+  program on the board is read from its memory map (as root, or with `sudo -n`; without
+  either the grey part is left out); it does not always come down when a model is unloaded,
+  and never after a load that failed. That figure decides whether a model fits, so a load
+  that would not fit is refused before it starts, with what is free. **Reset Accelerator**
+  is what brings it down.
 
   Under the bar, **Other Programs** says who else is on the accelerator and how much is
-  held beyond this app's models. The accelerator says how much is held in all, not by whom,
-  so the split is worked out: this app's share is what the held figure rose by as each of
-  its models was loaded, and the rest is everybody else's, or memory not given back. The
-  programs themselves are found by their mappings of `/dev/simaai-mem`, and NEAT GenAI
+  held beyond this app's models. On Platform 3.0 each program's share is measured (its own
+  `simaai,dms` buffers) and the programs are those holding such buffers or `/dev/mla`.
+  Before 3.0 the accelerator says how much is held in all, not by whom, so the split is
+  worked out: this app's share is what the held figure rose by as each of its models was
+  loaded, and the rest is everybody else's, or memory not given back. The programs
+  themselves are found by their mappings of `/dev/simaai-mem`, and NEAT GenAI
   Studio, which has a control port to ask (9997; `--studio-control`), is listed with the
   models it reports and their sizes. Those are its own estimates, and after a reset it can
   still name models that are no longer loaded. `GET /api/mla` returns all of it:
-  `total_bytes`, `held_bytes`, `app_bytes`, `other_bytes` and `programs`.
+  `total_bytes`, `held_bytes`, `app_bytes`, `other_bytes`, `programs` (with `held_bytes`
+  each on Platform 3.0) and `reset_stops_programs`.
 
 Several models can be on the MLA at once, as many as fit in its 16 GB beside what other
 programs hold: loading one leaves the others where they are, and a load that would not fit
@@ -662,9 +668,12 @@ If a model fails to load with `MLA_LOAD_FAILED`, the kernel could not supply a c
 buffer (`dmesg` shows `dma_alloc_coherent ... failed`). The usual cause is page cache
 occupying the CMA pool after large ELF files were read or copied; the runtime evicts each ELF
 from the page cache around loading it, and `run.sh` drops the cache at startup, for that
-reason. A load that has failed leaves memory held by the MLA server, and then only a reset
-helps: it restarts the board-wide MLA services and so unloads every model on the MLA, other
-applications' included. It never runs unless asked for, and there are three ways to ask:
+reason. A load that has failed can leave memory held, and then only a reset helps: it takes
+every model off the MLA, other applications' included. Before Platform 3.0 it restarts the
+board-wide MLA services (`simaai-appcomplex.service`). Platform 3.0 has no such service:
+every program holds its own models and they come off when it exits, so a reset stops the
+other programs that have the MLA open, each given a minute to exit cleanly before it is
+killed. It never runs unless asked for, and there are three ways to ask:
 
 - **Reset Accelerator** in Settings, which says what it will do and waits for a yes;
 - `/reset` at the `neat-decision` prompt;
